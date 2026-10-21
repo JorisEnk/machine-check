@@ -10,18 +10,17 @@ use super::dwarf;
 
 use crate::{
     dwarf::{Symbol, Symbols},
-    system::System,
+    system::machine_module::System,
 };
 
 /// Parses an ELF file and returns the system and usable symbols.
 pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
     // zero is guaranteed-illegal instruction
-    let halfword_zero = Bitvector::<16>::new(0);
+    let byte_zero = Bitvector::<8>::new(0);
 
     // program flash
     // 0x0000_0000..0x0002_0000 (17 bits)
-    // store in 16-bit elements to account for compressed instructions (16-bit index)
-    let mut program_flash = BitvectorArray::<16, 16>::new_filled(halfword_zero);
+    let mut program_flash = BitvectorArray::<17, 8>::new_filled(byte_zero);
 
     // load the program flash from program headers
     let elf_bytes = std::fs::read(path)?;
@@ -45,40 +44,9 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
         match address {
             0x0000_0000..0x0002_0000 => {
                 // load into program flash
-
-                let mut data_iter = data.iter().copied();
-
-                let mut address = address;
-
-                // handle non-aligned first byte
-                if address % 2 == 1 {
-                    if let Some(byte) = data_iter.next() {
-                        // first byte, it will be high byte
-                        program_flash[Bitvector::new((address / 2) as u64)] = program_flash
-                            [Bitvector::new((address / 2) as u64)]
-                            & Bitvector::<16>::new(0x00FF)
-                            | (Bitvector::<16>::new(byte as u64) << Bitvector::<16>::new(8));
-                        address += 1;
-                    }
-                }
-
-                // handle the rest
-                for value in data.chunks(2) {
-                    if value.len() == 2 {
-                        // full halfword, replace it
-                        let halfword = u16::from_le_bytes(value.try_into()?);
-                        program_flash[Bitvector::new((address / 2) as u64)] =
-                            Bitvector::new(halfword as u64);
-                    } else {
-                        // last byte, it will be low byte
-                        let byte = value[0];
-                        program_flash[Bitvector::new((address / 2) as u64)] = program_flash
-                            [Bitvector::new((address / 2) as u64)]
-                            & Bitvector::<16>::new(0xFF00)
-                            | (Bitvector::<16>::new(byte as u64));
-                    }
-
-                    address += value.len() as u32;
+                for value in data {
+                    program_flash[Bitvector::new(address as u64)] =
+                        Bitvector::<8>::new(*value as u64);
                 }
             }
             0x0101_0008..0x0101_0034 => {

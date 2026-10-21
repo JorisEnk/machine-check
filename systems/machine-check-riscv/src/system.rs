@@ -19,73 +19,38 @@ pub mod machine_module {
 
     /// System input.
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-    pub struct Input {
-        /// Pmn Input Data
-        ///
-        /// 5 ports, each with a maximum of 16 pins, halfwords 0x4004_0006 + 0x0020 * m
-        /// only some pins are connected, but that will be resolved by bit-masking
-        pub PIDR: BitvectorArray<3, 16>,
-    }
+    pub struct Input {}
 
     /// System state.
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
     pub struct State {
         /// Program Counter.
-        PC: Bitvector<32>,
+        PC: Bitvector<64>,
 
         /// 32 general-purpose registers.
         ///
         /// Register 0 is always zero.
-        reg: BitvectorArray<5, 32>,
+        reg: BitvectorArray<5, 64>,
 
         /// Onboard SRAM (Parity), 0x2000_4000..0x2000_7000
         ///
         /// this means there are 12288 bytes
         /// use a 14-bit array (16384) with further bounds checking
         sram_parity: BitvectorArray<14, 8>,
-
-        /// CLIC Interrupt (Pending, Enable, Attribute, Input Control) registers
-        ///
-        /// 51 words in 0xE200_1000..0xE200_10CC
-        /// represent as 204 bytes
-        clicint: BitvectorArray<8, 8>,
-
-        /// Port Output Data
-        ///
-        /// 5 ports, each with a maximum of 16 pins, halfwords 0x4004_0000 + 0x0020 * m
-        /// 0 = low (default), 1 = high
-        PODR: BitvectorArray<3, 16>,
-
-        /// Port Direction Register
-        ///
-        /// 5 ports, each with a maximum of 16 pins, halfwords 0x4004_0002 + 0x0020 * m
-        /// 0 = input (default), 1 = output
-        PDR: BitvectorArray<3, 16>,
-
-        // Control and Status Register: Machine trap-handler base address.
-        //
-        // Traps are not supported, only implemented to pass initialisation.
-        CSR_mtvec: Bitvector<32>,
-
-        // Control and Status Register: Machine trap-handler vector table base address.
-        //
-        // Traps are not supported, only implemented to pass initialisation.
-        CSR_mtvt: Bitvector<32>,
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
     pub struct System {
         /// Program flash, 0x0000_0000..0x0002_0000
         ///
-        /// here stored as little-endian halfwords
-        pub program_flash: BitvectorArray<16, 16>,
+        /// stored as bytes
+        pub program_flash: BitvectorArray<17, 8>,
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
     pub struct Param {
-        pub reg: BitvectorArray<5, 32>,
+        pub reg: BitvectorArray<5, 64>,
         pub sram_parity: BitvectorArray<14, 8>,
-        pub CSR_mtvec_base: Bitvector<26>,
     }
 
     impl ::machine_check::Machine for System {
@@ -96,34 +61,16 @@ pub mod machine_module {
         fn init(&self, _input: &Input, param: &Param) -> State {
             // the value of general-purpose registers after reset is undefined (except R0)
             let mut reg = Clone::clone(&param.reg);
-            reg[Bitvector::<5>::new(0)] = Bitvector::<32>::new(0);
+            reg[Bitvector::<5>::new(0)] = Bitvector::<64>::new(0);
 
             // SRAM data is undefined after power-on
             let sram_parity = Clone::clone(&param.sram_parity);
 
-            // init CLIC interrupt registers
-            let clicint: BitvectorArray<8, 8> = Self::initial_clicint();
-
-            // mtvec has initially base address (31:6) undefined and mode (5:0) set to 2
-            let CSR_mtvec = Into::<Bitvector<32>>::into(
-                Ext::<32>::ext(Into::<Unsigned<26>>::into(param.CSR_mtvec_base))
-                    << Unsigned::<32>::new(6),
-            ) | Bitvector::<32>::new(0x02);
-
-            // mtvt is initially zero
-            let CSR_mtvt = Bitvector::<32>::new(0);
-
             State {
                 // Program Counter starts at zero
-                PC: Bitvector::<32>::new(0),
+                PC: Bitvector::<64>::new(0),
                 reg,
                 sram_parity,
-                clicint,
-                // I/O port registers PODR and PDR are zero by default
-                PODR: BitvectorArray::<3, 16>::new_filled(Bitvector::<16>::new(0)),
-                PDR: BitvectorArray::<3, 16>::new_filled(Bitvector::<16>::new(0)),
-                CSR_mtvec,
-                CSR_mtvt,
             }
         }
 
@@ -135,17 +82,12 @@ pub mod machine_module {
             let first_half_2 = Ext::<14>::ext(first_half_1);
 
             // move PC past the first halfword
-            let PC = state.PC + Bitvector::<32>::new(2);
+            let PC = state.PC + Bitvector::<64>::new(2);
 
             let mut next_state = State {
                 PC,
                 reg: Clone::clone(&state.reg),
                 sram_parity: Clone::clone(&state.sram_parity),
-                clicint: Clone::clone(&state.clicint),
-                PODR: Clone::clone(&state.PODR),
-                PDR: Clone::clone(&state.PDR),
-                CSR_mtvec: Clone::clone(&state.CSR_mtvec),
-                CSR_mtvt: Clone::clone(&state.CSR_mtvt),
             };
 
             // perform instruction according to quadrant
@@ -169,7 +111,7 @@ pub mod machine_module {
             });
 
             // sanity-check that reg[0] is still zero
-            if next_state.reg[Bitvector::<5>::new(0)] != Bitvector::<32>::new(0) {
+            if next_state.reg[Bitvector::<5>::new(0)] != Bitvector::<64>::new(0) {
                 panic!("Register 0 has been set to non-zero");
             }
 
@@ -188,7 +130,7 @@ pub mod machine_module {
             // 32-bit instruction
             // fetch the upper half of instruction word
             let second_half: Unsigned<16> = Self::pc_halfword(self, state.PC);
-            let mut PC = state.PC + Bitvector::<32>::new(2);
+            let mut PC = state.PC + Bitvector::<64>::new(2);
 
             let opcode = Ext::<5>::ext(first_half_noncomp);
             let rd = Into::<Bitvector<5>>::into(Ext::<5>::ext(
@@ -198,13 +140,8 @@ pub mod machine_module {
 
             let mut reg = Clone::clone(&state.reg);
             let mut sram_parity = Clone::clone(&state.sram_parity);
-            let mut clicint = Clone::clone(&state.clicint);
-            let mut PODR = Clone::clone(&state.PODR);
-            let mut PDR = Clone::clone(&state.PDR);
-            let mut CSR_mtvec = Clone::clone(&state.CSR_mtvec);
-            let mut CSR_mtvt = Clone::clone(&state.CSR_mtvt);
 
-            // R32I_Zicsr implemented here
+            // RV64I implemented here
 
             bitmask_switch!(opcode {
                 "01100" => {
@@ -219,7 +156,7 @@ pub mod machine_module {
                     let value1 = reg[rs1];
                     let value2 = reg[rs2];
 
-                    let mut result = Bitvector::<32>::new(0);
+                    let mut result = Bitvector::<64>::new(0);
 
 
                     bitmask_switch!(funct3 {
@@ -264,7 +201,7 @@ pub mod machine_module {
                                 // SLL
                                 // note that RISC-V only uses the lower 5 bits of rs2
                                 // mask out the others first
-                                let shift_amount = value2 & Bitvector::<32>::new(0x11111);
+                                let shift_amount = value2 & Bitvector::<64>::new(0b11111);
                                 result = value1 << shift_amount;
                             } else {
                                 unimplemented!("SLL-like with other funct7");
@@ -274,16 +211,16 @@ pub mod machine_module {
                             // SRL/SRA
                             // note that RISC-V only uses the lower 5 bits of rs2 for shifting
                             // mask out the others first
-                            let shift_amount = value2 & Bitvector::<32>::new(0x11111);
+                            let shift_amount = value2 & Bitvector::<64>::new(0b11111);
 
                             if funct7 == Unsigned::<7>::new(0) {
                                 // SRL
                                 // i.e. shift as unsigned
-                                result = Into::<Bitvector<32>>::into(Into::<Unsigned<32>>::into(value1) >> Into::<Unsigned<32>>::into(shift_amount));
+                                result = Into::<Bitvector<64>>::into(Into::<Unsigned<64>>::into(value1) >> Into::<Unsigned<64>>::into(shift_amount));
                             } else if funct7 == Unsigned::<7>::new(0x20) {
                                 // SRA
                                 // i.e. shift as signed
-                                result = Into::<Bitvector<32>>::into(Into::<Signed<32>>::into(value1) >> Into::<Signed<32>>::into(shift_amount));
+                                result = Into::<Bitvector<64>>::into(Into::<Signed<64>>::into(value1) >> Into::<Signed<64>>::into(shift_amount));
                             } else {
                                 unimplemented!("SRL/SRA-like with other funct7");
                             }
@@ -291,10 +228,10 @@ pub mod machine_module {
                         "010" => {
                             if funct7 == Unsigned::<7>::new(0) {
                                 // SLT (set less than)
-                                if Into::<Signed<32>>::into(value1) < Into::<Signed<32>>::into(value2) {
-                                    result = Bitvector::<32>::new(1);
+                                if Into::<Signed<64>>::into(value1) < Into::<Signed<64>>::into(value2) {
+                                    result = Bitvector::<64>::new(1);
                                 } else {
-                                    result = Bitvector::<32>::new(0);
+                                    result = Bitvector::<64>::new(0);
                                 }
                             } else {
                                 unimplemented!("SLT-like with other funct7");
@@ -303,10 +240,10 @@ pub mod machine_module {
                         "011" => {
                             if funct7 == Unsigned::<7>::new(0) {
                                 // SLTU (set less than unsigned)
-                                if Into::<Unsigned<32>>::into(value1) < Into::<Unsigned<32>>::into(value2) {
-                                    result = Bitvector::<32>::new(1);
+                                if Into::<Unsigned<64>>::into(value1) < Into::<Unsigned<64>>::into(value2) {
+                                    result = Bitvector::<64>::new(1);
                                 } else {
-                                    result = Bitvector::<32>::new(0);
+                                    result = Bitvector::<64>::new(0);
                                 }
                             } else {
                                 unimplemented!("SLT-like with other funct7");
@@ -318,7 +255,7 @@ pub mod machine_module {
                     if rd != Bitvector::<5>::new(0) {
                         store = result;
                     } else {
-                        store = Bitvector::<32>::new(0);
+                        store = Bitvector::<64>::new(0);
                     }
                     reg[rd] = store;
                 }
@@ -331,9 +268,9 @@ pub mod machine_module {
 
                     // the immediate is taken as signed
                     let imm_low = Ext::<12>::ext(second_half >> Unsigned::<16>::new(4));
-                    let imm = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Signed<12>>::into(imm_low)));
+                    let imm = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<12>>::into(imm_low)));
 
-                    let mut result = Bitvector::<32>::new(0);
+                    let mut result = Bitvector::<64>::new(0);
 
                     bitmask_switch!(funct3 {
                         "000" => {
@@ -354,26 +291,28 @@ pub mod machine_module {
                         }
                         "001" => {
                             // SLLI
-                            let imm_lo = Ext::<5>::ext(Into::<Unsigned::<32>>::into(imm));
-                            let imm_hi = Ext::<7>::ext(Into::<Unsigned::<32>>::into(imm) >> Unsigned::<32>::new(5));
+                            // RV64I: 6 instead of 5 immediate bits
+                            let imm_lo = Ext::<6>::ext(Into::<Unsigned::<64>>::into(imm));
+                            let imm_hi = Ext::<6>::ext(Into::<Unsigned::<64>>::into(imm) >> Unsigned::<64>::new(6));
                             // imm[5:11] must be 0x00
-                            if imm_hi == Unsigned::<7>::new(0) {
-                                result = Into::<Bitvector<32>>::into(Into::<Unsigned<32>>::into(value1) << Ext::<32>::ext(imm_lo));
+                            if imm_hi == Unsigned::<6>::new(0) {
+                                result = Into::<Bitvector<64>>::into(Into::<Unsigned<64>>::into(value1) << Ext::<64>::ext(imm_lo));
                             } else {
                                 unimplemented!("SLLI-like with non-zero high immediate");
                             }
                         }
                         "101" => {
                             // SRLI / SRAI
-                            let imm_lo = Ext::<5>::ext(Into::<Unsigned::<32>>::into(imm));
-                            let imm_hi = Ext::<7>::ext(Into::<Unsigned::<32>>::into(imm) >> Unsigned::<32>::new(5));
-                            // logical (SRLI) when imm[5:11] = 0x00
-                            // arithmetical (SRAI) when imm[5:11] = 0x20
+                            // RV64I: 6 instead of 5 immediate bits
+                            let imm_lo = Ext::<6>::ext(Into::<Unsigned::<64>>::into(imm));
+                            let imm_hi = Ext::<6>::ext(Into::<Unsigned::<64>>::into(imm) >> Unsigned::<64>::new(6));
+                            // logical (SRLI) when imm[6:11] = 0x00
+                            // arithmetical (SRAI) when imm[6:11] = 0x10
 
-                            if imm_hi == Unsigned::<7>::new(0) {
-                                result = Into::<Bitvector<32>>::into(Into::<Unsigned<32>>::into(value1) << Ext::<32>::ext(imm_lo));
-                            } else if imm_hi == Unsigned::<7>::new(0x20) {
-                                result = Into::<Bitvector<32>>::into(Into::<Signed<32>>::into(value1) << Into::<Signed<32>>::into(Ext::<32>::ext(imm_lo)));
+                            if imm_hi == Unsigned::<6>::new(0) {
+                                result = Into::<Bitvector<64>>::into(Into::<Unsigned<64>>::into(value1) << Ext::<64>::ext(imm_lo));
+                            } else if imm_hi == Unsigned::<6>::new(0x10) {
+                                result = Into::<Bitvector<64>>::into(Into::<Signed<64>>::into(value1) << Into::<Signed<64>>::into(Ext::<64>::ext(imm_lo)));
                             } else {
                                 unimplemented!("SRLI/SRAI-like with unrecognised high immediate");
                             }
@@ -384,10 +323,10 @@ pub mod machine_module {
                             // compare rs1 value with sign-extended immediate, using signed comparison
                             // write 1 to result if rs1 is lesser, 0 otherwise
 
-                            if Into::<Signed::<32>>::into(value1) < Into::<Signed::<32>>::into(imm) {
-                                result = Bitvector::<32>::new(1);
+                            if Into::<Signed::<64>>::into(value1) < Into::<Signed::<64>>::into(imm) {
+                                result = Bitvector::<64>::new(1);
                             } else {
-                                result = Bitvector::<32>::new(0);
+                                result = Bitvector::<64>::new(0);
                             }
                         }
                         "011" => {
@@ -396,10 +335,10 @@ pub mod machine_module {
                             // the immediate is sign extended as normal, but unsigned comparison is used
                             // write 1 to result if rs1 is lesser, 0 otherwise
 
-                            if Into::<Unsigned::<32>>::into(value1) < Into::<Unsigned::<32>>::into(imm) {
-                                result = Bitvector::<32>::new(1);
+                            if Into::<Unsigned::<64>>::into(value1) < Into::<Unsigned::<64>>::into(imm) {
+                                result = Bitvector::<64>::new(1);
                             } else {
-                                result = Bitvector::<32>::new(0);
+                                result = Bitvector::<64>::new(0);
                             }
                         }
                     });
@@ -408,7 +347,7 @@ pub mod machine_module {
                     if rd != Bitvector::<5>::new(0) {
                         store = result;
                     } else {
-                        store = Bitvector::<32>::new(0);
+                        store = Bitvector::<64>::new(0);
                     }
                     reg[rd] = store;
                 }
@@ -423,9 +362,9 @@ pub mod machine_module {
 
                     // the immediate is taken as signed
                     let imm_low = Ext::<12>::ext(second_half >> Unsigned::<16>::new(4));
-                    let imm = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Signed<12>>::into(imm_low)));
+                    let imm = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<12>>::into(imm_low)));
 
-                    let address = Into::<Unsigned<32>>::into(value1 + imm);
+                    let address = Into::<Unsigned<64>>::into(value1 + imm);
 
 
                     reg = Self::load(self, state, input, rd, address, funct3);
@@ -439,9 +378,9 @@ pub mod machine_module {
                     let rs2: Bitvector<5> = Self::extract_rs2(second_half);
 
                     let imm_low: Bitvector<12> = Self::extract_s_type_imm(first_half_noncomp, second_half);
-                    let imm: Unsigned<32> =Into::<Unsigned<32>>::into(Ext::<32>::ext(Into::<Signed<12>>::into(imm_low)));
+                    let imm: Unsigned<64> =Into::<Unsigned<64>>::into(Ext::<64>::ext(Into::<Signed<12>>::into(imm_low)));
 
-                    let value1 = Into::<Unsigned<32>>::into(reg[rs1]);
+                    let value1 = Into::<Unsigned<64>>::into(reg[rs1]);
 
                     let address = value1 + imm;
                     let store_value = reg[rs2];
@@ -449,9 +388,6 @@ pub mod machine_module {
                     let store_result: State = Self::store(state, address, store_value, funct3);
                     reg = Clone::clone(&store_result.reg);
                     sram_parity = Clone::clone(&store_result.sram_parity);
-                    clicint = Clone::clone(&store_result.clicint);
-                    PODR = Clone::clone(&store_result.PODR);
-                    PDR = Clone::clone(&store_result.PDR);
                     // store does not modify CSRs
                 }
                 "11000" => {
@@ -479,7 +415,7 @@ pub mod machine_module {
                     let short_imm = imm_11_placed | imm_10_1_placed | imm_12_placed;
 
                     // extend immediate as signed integer
-                    let extended_imm = Ext::<32>::ext(Into::<Signed<13>>::into(short_imm));
+                    let extended_imm = Ext::<64>::ext(Into::<Signed<13>>::into(short_imm));
 
                     // determine if we should branch
                     let value1 = reg[rs1];
@@ -505,25 +441,25 @@ pub mod machine_module {
                         }
                         "100" => {
                             // BLT (branch if less than, signed)
-                            if Into::<Signed::<32>>::into(value1) < Into::<Signed::<32>>::into(value2) {
+                            if Into::<Signed::<64>>::into(value1) < Into::<Signed::<64>>::into(value2) {
                                 should_branch = Bitvector::<1>::new(1);
                             }
                         }
                         "101" => {
                             // BGE (branch if greater or equal, signed)
-                            if Into::<Signed::<32>>::into(value1) >= Into::<Signed::<32>>::into(value2) {
+                            if Into::<Signed::<64>>::into(value1) >= Into::<Signed::<64>>::into(value2) {
                                 should_branch = Bitvector::<1>::new(1);
                             }
                         }
                         "110" => {
                             // BLTU (branch if less than, unsigned)
-                            if Into::<Unsigned::<32>>::into(value1) < Into::<Unsigned::<32>>::into(value2) {
+                            if Into::<Unsigned::<64>>::into(value1) < Into::<Unsigned::<64>>::into(value2) {
                                 should_branch = Bitvector::<1>::new(1);
                             }
                         }
                         "111" => {
                             // BGEU (branch if greater or equal, unsigned)
-                            if Into::<Unsigned::<32>>::into(value1) >= Into::<Unsigned::<32>>::into(value2) {
+                            if Into::<Unsigned::<64>>::into(value1) >= Into::<Unsigned::<64>>::into(value2) {
                                 should_branch = Bitvector::<1>::new(1);
                             }
                         }
@@ -531,7 +467,7 @@ pub mod machine_module {
 
                     if should_branch == Bitvector::<1>::new(1) {
                         // undo pre-increment (non-compressed instruction, 4 bytes) and add immediate to PC
-                       PC = PC - Bitvector::<32>::new(4) + Into::<Bitvector<32>>::into(Ext::<32>::ext(extended_imm));
+                       PC = PC - Bitvector::<64>::new(4) + Into::<Bitvector<64>>::into(Ext::<64>::ext(extended_imm));
                     }
 
                 }
@@ -563,7 +499,7 @@ pub mod machine_module {
                     let imm = imm_15_12_placed | imm_19_16_placed | imm_11_placed | imm_10_1_placed | imm_20_placed;
 
                     // sign-extend the immediate to obtain the actual offset
-                    let offset = Ext::<32>::ext(Into::<Signed<20>>::into(imm));
+                    let offset = Ext::<64>::ext(Into::<Signed<20>>::into(imm));
 
                     // if the destination (link) register is not zero, write to it
                     // the address of the next instructions (currently in PC)
@@ -571,13 +507,13 @@ pub mod machine_module {
                     if rd != Bitvector::<5>::new(0) {
                         link_value = PC;
                     } else {
-                        link_value = Bitvector::<32>::new(0);
+                        link_value = Bitvector::<64>::new(0);
                     }
                     reg[rd] = link_value;
 
                     // relative jump to the sum of pre-increment PC and offset
                     // undo pre-increment (non-compressed instruction, 4 bytes) and add offset to PC
-                    PC = PC - Bitvector::<32>::new(4) + Into::<Bitvector<32>>::into(Ext::<32>::ext(offset));
+                    PC = PC - Bitvector::<64>::new(4) + Into::<Bitvector<64>>::into(Ext::<64>::ext(offset));
                 }
                 "11001" => {
                     // I-type
@@ -593,7 +529,7 @@ pub mod machine_module {
                     // i.e. bits 4:15 of second half-word
                     let imm_low = Ext::<12>::ext(second_half >> Unsigned::<16>::new(4));
                     // signed-extend the immediate
-                    let imm = Into::<Bitvector::<32>>::into(Ext::<32>::ext(Into::<Signed<12>>::into(imm_low)));
+                    let imm = Into::<Bitvector::<64>>::into(Ext::<64>::ext(Into::<Signed<12>>::into(imm_low)));
 
                     // if the destination (link) register is not zero, write to it
                     // the address of the next instructions (currently in PC)
@@ -601,7 +537,7 @@ pub mod machine_module {
                     if rd != Bitvector::<5>::new(0) {
                         link_value = PC;
                     } else {
-                        link_value = Bitvector::<32>::new(0);
+                        link_value = Bitvector::<64>::new(0);
                     }
                     reg[rd] = link_value;
 
@@ -611,7 +547,7 @@ pub mod machine_module {
                     // to obtain the new PC value
                     // the least significant bit must be set to zero afterward
                     let new_pc = value1 + imm;
-                    PC = new_pc & !Bitvector::<32>::new(1);
+                    PC = new_pc & !Bitvector::<64>::new(1);
                 }
                 "0q101" => {
                     // U-type
@@ -620,37 +556,29 @@ pub mod machine_module {
                     let imm_second_half = Ext::<20>::ext(second_half) << Unsigned::<20>::new(4);
                     let imm = imm_second_half + Ext::<20>::ext(first_half_rest);
                     let extended_imm = Ext::<32>::ext(imm) << Unsigned::<32>::new(12);
+                    // RV64I: sign-extend the 32-bit result
+                    let sign_extended_imm = Into::<Unsigned<64>>::into(Ext::<64>::ext(Into::<Signed<32>>::into(extended_imm)));
 
-                    let instruction_start_pc = Into::<Unsigned<32>>::into(PC - Bitvector::<32>::new(4));
+                    let instruction_start_pc = Into::<Unsigned<64>>::into(PC - Bitvector::<64>::new(4));
 
                     let mut result;
 
                     if q == Bitvector::<1>::new(0) {
                         // add the PC to the extended immediate
-                        result = extended_imm + instruction_start_pc;
+                        result = sign_extended_imm + instruction_start_pc;
                     } else {
                         // just load the extended immediate
-                        result = extended_imm;
+                        result = sign_extended_imm;
                     }
                     if rd == Bitvector::<5>::new(0) {
-                        result = Unsigned::<32>::new(0);
+                        result = Unsigned::<64>::new(0);
                     }
-                    reg[rd] = Into::<Bitvector<32>>::into(result);
+                    reg[rd] = Into::<Bitvector<64>>::into(result);
 
                 }
                 "11100" => {
                     let funct3 = Ext::<3>::ext(first_half_rest);
-
-                    let mut csr_rw = Bitvector::<1>::new(0);
-                    let mut csr_rs = Bitvector::<1>::new(0);
-                    let mut csr_rc = Bitvector::<1>::new(0);
-                    let mut csr_write_value = Bitvector::<32>::new(0);
-
-                    let rs1: Bitvector<5> = Self::extract_rs1(first_half_rest, second_half);
-
-                    bitmask_switch!(funct3 {
-                        "000" => {
-
+                    if funct3 == Unsigned::<3>::new(0) {
                             if rd == Bitvector::<5>::new(0) && first_half_rest == Unsigned::<4>::new(0) && second_half == Unsigned::<16>::new(0) {
                                 // ECALL
                                 unimplemented!("Environment Call");
@@ -660,72 +588,8 @@ pub mod machine_module {
                                 unimplemented!("Environment Break");
                             }
                             unimplemented!("ECall/EBreak-like (funct3 = 0)");
-                        }
-                        "001" => {
-                            // CSRRW
-                            csr_rw = Bitvector::<1>::new(1);
-                            csr_write_value = reg[rs1];
-                        }
-                        "010" => {
-                            // CSRRS
-                            csr_rs = Bitvector::<1>::new(1);
-                            csr_write_value = reg[rs1];
-                        }
-                        "011" => {
-                            // CSRRC
-                            csr_rc = Bitvector::<1>::new(1);
-                            csr_write_value = reg[rs1];
-                        }
-                        "100" => {
-                            unimplemented!("ECall/EBreak-like (funct3 = 4)");
-                        }
-                        "101" => {
-                            // CSRRWI
-                            csr_rw = Bitvector::<1>::new(1);
-                            // the value is zero-extended content of 19:15
-                            csr_write_value = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Unsigned::<5>>::into(rs1)));
-                        }
-                        "110" => {
-                            // CSRRSI
-                            csr_rs = Bitvector::<1>::new(1);
-                            // the value is zero-extended content of 19:15
-                            csr_write_value = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Unsigned::<5>>::into(rs1)));
-                        }
-                        "111" => {
-                            // CSRRCI
-                            csr_rc = Bitvector::<1>::new(1);
-                            // the value is zero-extended content of 19:15
-                            csr_write_value = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Unsigned::<5>>::into(rs1)));
-                        }
-                    });
-
-                    if csr_rw == Bitvector::<1>::new(1) || csr_rs == Bitvector::<1>::new(1) || csr_rc == Bitvector::<1>::new(1) {
-                        // we should read the CSR and store it into rd
-                        // then write / set / reset bits in the CSR value
-
-                        // the CSR specifier is located at 31:20
-                        let csr_specifier = Ext::<12>::ext(second_half >> Unsigned::<16>::new(4));
-
-                        if csr_specifier == Unsigned::<12>::new(0x305) {
-                            // mtvec
-                            if rd != Bitvector::<5>::new(0) {
-                                reg[rd] = CSR_mtvec;
-                            }
-                            CSR_mtvec = Self::csr_write_value(csr_rs, csr_rc, CSR_mtvec, csr_write_value);
-
-                        } else if csr_specifier == Unsigned::<12>::new(0x307) {
-                            // mtvt
-
-                            if rd != Bitvector::<5>::new(0) {
-                                reg[rd] = CSR_mtvt;
-                            }
-                            // bits 5:0 are not writable
-                            let write_value = Self::csr_write_value( csr_rs, csr_rc, CSR_mtvt, csr_write_value);
-                            CSR_mtvt = write_value & Bitvector::<32>::new(0xFFFFFC0);
-                        } else {
-                            unimplemented!("Control Status Register given");
-                        }
-
+                    } else {
+                        unimplemented!("ECall/EBreak-like (funct3 != 0)");
                     }
                 }
                 "00011" => {
@@ -740,11 +604,6 @@ pub mod machine_module {
                 PC,
                 reg,
                 sram_parity,
-                clicint,
-                PODR,
-                PDR,
-                CSR_mtvec,
-                CSR_mtvt,
             }
         }
 
@@ -757,9 +616,6 @@ pub mod machine_module {
         ) -> State {
             let mut reg = Clone::clone(&state.reg);
             let mut sram_parity = Clone::clone(&state.sram_parity);
-            let mut clicint = Clone::clone(&state.clicint);
-            let mut PODR = Clone::clone(&state.PODR);
-            let mut PDR = Clone::clone(&state.PDR);
 
             // all C extension instructions in this quadrant (0) implemented
 
@@ -790,12 +646,12 @@ pub mod machine_module {
                         let uimm_9_6 = Ext::<4>::ext(uimm >> Unsigned::<8>::new(2));
                         let uimm_5_4 = Ext::<2>::ext(uimm >> Unsigned::<8>::new(6));
 
-                        let uimm_3_placed = Ext::<32>::ext(uimm_3) << Unsigned::<32>::new(3);
-                        let uimm_2_placed = Ext::<32>::ext(uimm_2) << Unsigned::<32>::new(2);
-                        let uimm_9_6_placed = Ext::<32>::ext(uimm_9_6) << Unsigned::<32>::new(6);
-                        let uimm_5_4_placed = Ext::<32>::ext(uimm_5_4) << Unsigned::<32>::new(4);
+                        let uimm_3_placed = Ext::<64>::ext(uimm_3) << Unsigned::<64>::new(3);
+                        let uimm_2_placed = Ext::<64>::ext(uimm_2) << Unsigned::<64>::new(2);
+                        let uimm_9_6_placed = Ext::<64>::ext(uimm_9_6) << Unsigned::<64>::new(6);
+                        let uimm_5_4_placed = Ext::<64>::ext(uimm_5_4) << Unsigned::<64>::new(4);
 
-                        let offset = Into::<Bitvector::<32>>::into(uimm_9_6_placed | uimm_5_4_placed | uimm_3_placed | uimm_2_placed);
+                        let offset = Into::<Bitvector::<64>>::into(uimm_9_6_placed | uimm_5_4_placed | uimm_3_placed | uimm_2_placed);
 
                         // we add the offset to the stack pointer x2
                         let result = reg[Bitvector::<5>::new(2)] + offset;
@@ -818,14 +674,14 @@ pub mod machine_module {
                     let uimm_2 = Ext::<1>::ext(uimm >> Unsigned::<5>::new(1));
                     let uimm_5_3 = Ext::<3>::ext(uimm >> Unsigned::<5>::new(2));
 
-                    let uimm_6_placed = Ext::<32>::ext(uimm_6) << Unsigned::<32>::new(6);
-                    let uimm_2_placed = Ext::<32>::ext(uimm_2) << Unsigned::<32>::new(2);
-                    let uimm_5_3_placed = Ext::<32>::ext(uimm_5_3) << Unsigned::<32>::new(3);
+                    let uimm_6_placed = Ext::<64>::ext(uimm_6) << Unsigned::<64>::new(6);
+                    let uimm_2_placed = Ext::<64>::ext(uimm_2) << Unsigned::<64>::new(2);
+                    let uimm_5_3_placed = Ext::<64>::ext(uimm_5_3) << Unsigned::<64>::new(3);
 
-                    let offset = Into::<Bitvector::<32>>::into(uimm_6_placed | uimm_5_3_placed | uimm_2_placed);
+                    let offset = Into::<Bitvector::<64>>::into(uimm_6_placed | uimm_5_3_placed | uimm_2_placed);
 
                     // we add the offset to the base register in rs1
-                    let address = Into::<Unsigned<32>>::into(reg[rs1] + offset);
+                    let address = Into::<Unsigned<64>>::into(reg[rs1] + offset);
 
                     // we need to load/store a 32-bit value (word), i.e. funct3 value 2
                     let funct3 = Unsigned::<3>::new(2);
@@ -841,9 +697,6 @@ pub mod machine_module {
                         let store_result: State = Self::store(state, address, store_value, funct3);
                         reg = Clone::clone(&store_result.reg);
                         sram_parity = Clone::clone(&store_result.sram_parity);
-                        clicint = Clone::clone(&store_result.clicint);
-                        PODR = Clone::clone(&store_result.PODR);
-                        PDR = Clone::clone(&store_result.PDR);
                         // store does not modify CSRs
                     }
                 }
@@ -855,11 +708,6 @@ pub mod machine_module {
                 PC: state.PC,
                 reg,
                 sram_parity,
-                clicint,
-                PODR,
-                PDR,
-                CSR_mtvec: Clone::clone(&state.CSR_mtvec),
-                CSR_mtvt: Clone::clone(&state.CSR_mtvt),
             }
         }
 
@@ -874,9 +722,6 @@ pub mod machine_module {
 
             let mut PC = state.PC;
             let sram_parity = Clone::clone(&state.sram_parity);
-            let clicint = Clone::clone(&state.clicint);
-            let PODR = Clone::clone(&state.PODR);
-            let PDR = Clone::clone(&state.PDR);
 
             // all C extension instructions in this quadrant (1) implemented
 
@@ -886,7 +731,7 @@ pub mod machine_module {
                     // sign-extended
                     let imm = Into::<Signed<6>>::into(i);
                     if d != Bitvector::<5>::new(0) {
-                        reg[d] = Into::<Bitvector<32>>::into(Ext::<32>::ext(imm));
+                        reg[d] = Into::<Bitvector<64>>::into(Ext::<64>::ext(imm));
                     }
                 }
                 "011_i_ddddd_iiiii" => {
@@ -899,18 +744,18 @@ pub mod machine_module {
                         // C.ADDI16SP
                         // add sign-extended immediate scaled to represent multiples of 16 (2 to the power of 4)
                         let lower_imm = Ext::<10>::ext(Into::<Unsigned<6>>::into(i)) << Unsigned::<10>::new(4);
-                        let imm = Ext::<32>::ext(Into::<Signed<10>>::into(lower_imm));
+                        let imm = Ext::<64>::ext(Into::<Signed<10>>::into(lower_imm));
 
-                        reg[d] = Into::<Bitvector<32>>::into(imm);
+                        reg[d] = Into::<Bitvector<64>>::into(imm);
                     } else if d != Bitvector::<5>::new(0) {
                         // C.LUI
                         // the immediate corresponds to bits 17:12
                         // lower bits are cleared and the upper sign-extended
 
                         let lower_imm = Ext::<17>::ext(Into::<Unsigned<6>>::into(i)) << Unsigned::<17>::new(12);
-                        let imm = Ext::<32>::ext(Into::<Signed<17>>::into(lower_imm));
+                        let imm = Ext::<64>::ext(Into::<Signed<17>>::into(lower_imm));
 
-                        reg[d] = Into::<Bitvector<32>>::into(imm);
+                        reg[d] = Into::<Bitvector<64>>::into(imm);
                     } else {
                         // hint, do nothing
                     }
@@ -933,7 +778,7 @@ pub mod machine_module {
 
                     let offset = Into::<Bitvector<12>>::into(a_part | b_part | c_part | d_part | e_part | f_part | g_part | h_part);
 
-                    let extended_offset = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Signed<12>>::into(offset)));
+                    let extended_offset = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<12>>::into(offset)));
 
                     let mut link_value = reg[Bitvector::<5>::new(1)];
 
@@ -944,7 +789,7 @@ pub mod machine_module {
                     reg[Bitvector::<5>::new(1)] = link_value;
 
                     // undo pre-increment and add offset to PC
-                    PC = PC - Bitvector::<32>::new(2) + extended_offset;
+                    PC = PC - Bitvector::<64>::new(2) + extended_offset;
 
                 }
                 "11q_ebb_sss_ddaac" => {
@@ -959,7 +804,7 @@ pub mod machine_module {
 
                     let offset = Into::<Bitvector<9>>::into(a_part | b_part | c_part | d_part | e_part);
 
-                    let extended_offset = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Signed<9>>::into(offset)));
+                    let extended_offset = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<9>>::into(offset)));
 
                     // three-bit register operands map to registers 8:15
                     let rs1 = Into::<Bitvector::<5>>::into(Ext::<5>::ext(Into::<Unsigned<3>>::into(s)) + Unsigned::<5>::new(8));
@@ -970,27 +815,26 @@ pub mod machine_module {
 
                     if q == Bitvector::<1>::new(0) {
                         // branch if equal to zero
-                        if value1 == Bitvector::<32>::new(0) {
+                        if value1 == Bitvector::<64>::new(0) {
                             should_branch = Bitvector::<1>::new(1);
                         }
                     } else {
                         // branch if not equal to zero
-                        if value1 != Bitvector::<32>::new(0) {
+                        if value1 != Bitvector::<64>::new(0) {
                             should_branch = Bitvector::<1>::new(1);
                         }
                     }
 
                     if should_branch == Bitvector::<1>::new(1) {
                         // undo pre-increment and add offset to PC
-                        PC = PC - Bitvector::<32>::new(2) + extended_offset;
+                        PC = PC - Bitvector::<64>::new(2) + extended_offset;
                     }
                 }
                 "000_n_ddddd_nnnnn" => {
                     // C.NOP (n == 0) or C.ADDI (n != 0)
-
                     if n != Bitvector::<6>::new(0) {
                         // sign-extend immediate
-                        let extended_imm = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Signed<6>>::into(n)));
+                        let extended_imm = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<6>>::into(n)));
 
                         let result;
 
@@ -998,7 +842,7 @@ pub mod machine_module {
                             result = reg[d] + extended_imm;
                         } else {
                             // hint
-                            result = Bitvector::<32>::new(0);
+                            result = Bitvector::<64>::new(0);
                         }
 
                         reg[d] = result;
@@ -1009,22 +853,22 @@ pub mod machine_module {
                     // HINT if uimm is zero
 
                     let rd = Into::<Bitvector::<5>>::into(Ext::<5>::ext(Into::<Unsigned<3>>::into(d)) + Unsigned::<5>::new(8));
-                    let shift_amount = Ext::<32>::ext(Into::<Unsigned::<5>>::into(u));
+                    let shift_amount = Ext::<64>::ext(Into::<Unsigned::<5>>::into(u));
 
                     if a == Bitvector::<1>::new(1) {
                         // C.SRAI
-                        let shift_amount_signed = Into::<Signed::<32>>::into(shift_amount);
-                        reg[rd] = Into::<Bitvector<32>>::into(Into::<Signed<32>>::into(reg[rd]) << shift_amount_signed);
+                        let shift_amount_signed = Into::<Signed::<64>>::into(shift_amount);
+                        reg[rd] = Into::<Bitvector<64>>::into(Into::<Signed<64>>::into(reg[rd]) << shift_amount_signed);
                     } else {
                         // C.SRLI
-                        reg[rd] = Into::<Bitvector<32>>::into(Into::<Unsigned<32>>::into(reg[rd]) >> shift_amount);
+                        reg[rd] = Into::<Bitvector<64>>::into(Into::<Unsigned<64>>::into(reg[rd]) >> shift_amount);
                     }
                 }
                 "100_i_10_ddd_iiiii" => {
                     // C.ANDI
 
                     let rd = Into::<Bitvector::<5>>::into(Ext::<5>::ext(Into::<Unsigned<3>>::into(d)) + Unsigned::<5>::new(8));
-                    let immediate = Into::<Bitvector::<32>>::into(Ext::<32>::ext(Into::<Signed::<6>>::into(i)));
+                    let immediate = Into::<Bitvector::<64>>::into(Ext::<64>::ext(Into::<Signed::<6>>::into(i)));
 
                     reg[rd] = reg[rd] & immediate;
                 }
@@ -1062,11 +906,6 @@ pub mod machine_module {
                 PC,
                 reg,
                 sram_parity,
-                clicint,
-                PODR,
-                PDR,
-                CSR_mtvec: Clone::clone(&state.CSR_mtvec),
-                CSR_mtvt: Clone::clone(&state.CSR_mtvt),
             }
         }
 
@@ -1080,9 +919,6 @@ pub mod machine_module {
             let mut PC = state.PC;
             let mut reg = Clone::clone(&state.reg);
             let mut sram_parity = Clone::clone(&state.sram_parity);
-            let mut clicint = Clone::clone(&state.clicint);
-            let mut PODR = Clone::clone(&state.PODR);
-            let mut PDR = Clone::clone(&state.PDR);
 
             // all C extension instructions in this quadrant (2) implemented
 
@@ -1098,7 +934,7 @@ pub mod machine_module {
                     }
 
                     if d != Bitvector::<5>::new(0) {
-                        reg[d] = Into::<Bitvector<32>>::into(Into::<Unsigned<32>>::into(reg[d]) << Ext::<32>::ext(shamt));
+                        reg[d] = Into::<Bitvector<64>>::into(Into::<Unsigned<64>>::into(reg[d]) << Ext::<64>::ext(shamt));
                     }
                 }
 
@@ -1138,7 +974,7 @@ pub mod machine_module {
                             // the least significant bit must be set to zero afterward
 
                             let jump_address = reg[rd];
-                            PC = jump_address & !Bitvector::<32>::new(1);
+                            PC = jump_address & !Bitvector::<64>::new(1);
 
                         } else if q == Bitvector::<1>::new(1) {
                                 // rs2 == 0, rd2 == 0, q == 1
@@ -1160,14 +996,14 @@ pub mod machine_module {
                         let uimm_4_2 = Ext::<3>::ext(uimm >> Unsigned::<6>::new(2));
                         let uimm_5 = Ext::<3>::ext(uimm >> Unsigned::<6>::new(5));
 
-                        let uimm_7_6_placed = Ext::<32>::ext(uimm_7_6) << Unsigned::<32>::new(6);
-                        let uimm_4_2_placed = Ext::<32>::ext(uimm_4_2) << Unsigned::<32>::new(2);
-                        let uimm_5_placed = Ext::<32>::ext(uimm_5) << Unsigned::<32>::new(5);
+                        let uimm_7_6_placed = Ext::<64>::ext(uimm_7_6) << Unsigned::<64>::new(6);
+                        let uimm_4_2_placed = Ext::<64>::ext(uimm_4_2) << Unsigned::<64>::new(2);
+                        let uimm_5_placed = Ext::<64>::ext(uimm_5) << Unsigned::<64>::new(5);
 
-                        let offset = Into::<Bitvector::<32>>::into(uimm_7_6_placed | uimm_4_2_placed | uimm_5_placed);
+                        let offset = Into::<Bitvector::<64>>::into(uimm_7_6_placed | uimm_4_2_placed | uimm_5_placed);
 
                         // the effective address adds the offset to the stack pointer x2
-                        let address = Into::<Unsigned::<32>>::into(reg[Bitvector::<5>::new(2)] + offset);
+                        let address = Into::<Unsigned::<64>>::into(reg[Bitvector::<5>::new(2)] + offset);
 
                         // we need to load a 32-bit value (word), i.e. funct3 value 2
                         let funct3 = Unsigned::<3>::new(2);
@@ -1185,13 +1021,13 @@ pub mod machine_module {
                     let uimm_7_6 = Ext::<2>::ext(uimm);
                     let uimm_5_2 = Ext::<4>::ext(uimm >> Unsigned::<6>::new(2));
 
-                    let uimm_7_6_placed = Ext::<32>::ext(uimm_7_6) << Unsigned::<32>::new(6);
-                    let uimm_5_2_placed = Ext::<32>::ext(uimm_5_2) << Unsigned::<32>::new(2);
+                    let uimm_7_6_placed = Ext::<64>::ext(uimm_7_6) << Unsigned::<64>::new(6);
+                    let uimm_5_2_placed = Ext::<64>::ext(uimm_5_2) << Unsigned::<64>::new(2);
 
-                    let offset = Into::<Bitvector::<32>>::into(uimm_7_6_placed | uimm_5_2_placed);
+                    let offset = Into::<Bitvector::<64>>::into(uimm_7_6_placed | uimm_5_2_placed);
 
                     // the effective address adds the offset to the stack pointer x2
-                        let address = Into::<Unsigned::<32>>::into(reg[Bitvector::<5>::new(2)] + offset);
+                        let address = Into::<Unsigned::<64>>::into(reg[Bitvector::<5>::new(2)] + offset);
 
                     // we need to store a 32-bit value (word), i.e. funct3 value 2
                     let funct3 = Unsigned::<3>::new(2);
@@ -1201,9 +1037,6 @@ pub mod machine_module {
                     let store_result: State = Self::store(state, address, store_value, funct3);
                     reg = Clone::clone(&store_result.reg);
                     sram_parity = Clone::clone(&store_result.sram_parity);
-                    clicint = Clone::clone(&store_result.clicint);
-                    PODR = Clone::clone(&store_result.PODR);
-                    PDR = Clone::clone(&store_result.PDR);
                     // store does not modify CSRs
 
 
@@ -1215,31 +1048,27 @@ pub mod machine_module {
                 PC,
                 reg,
                 sram_parity,
-                clicint,
-                PODR,
-                PDR,
-                CSR_mtvec: Clone::clone(&state.CSR_mtvec),
-                CSR_mtvt: Clone::clone(&state.CSR_mtvt),
             }
         }
 
-        fn pc_halfword(&self, PC: Bitvector<32>) -> Unsigned<16> {
-            let unsigned_pc = Into::<Unsigned<32>>::into(PC);
-            // ensure the lowest bit of PC is zero
-            if Ext::<1>::ext(unsigned_pc) != Unsigned::<1>::new(0) {
-                panic!("Nonzero lowest bit of Program Counter");
-            }
-
+        fn pc_halfword(&self, PC: Bitvector<64>) -> Unsigned<16> {
+            let unsigned_pc0: Unsigned<64> = Into::<Unsigned<64>>::into(PC);
+            let unsigned_pc1: Unsigned<64> =
+                Into::<Unsigned<64>>::into(PC + Bitvector::<64>::new(1));
             // only fetching from flash is supported
-            if unsigned_pc >> Unsigned::<32>::new(17) != Unsigned::<32>::new(0) {
+            if unsigned_pc0 >> Unsigned::<64>::new(17) != Unsigned::<64>::new(0)
+                || unsigned_pc1 >> Unsigned::<64>::new(17) != Unsigned::<64>::new(0)
+            {
                 unimplemented!("Program Counter not within program flash");
             }
 
-            // for halfwords, drop the lowest bit
-            let halfword_pc =
-                Ext::<16>::ext(Into::<Unsigned<32>>::into(PC) >> Unsigned::<32>::new(1));
+            let index0 = Into::<Bitvector<17>>::into(Ext::<17>::ext(unsigned_pc0));
+            let index1 = Into::<Bitvector<17>>::into(Ext::<17>::ext(unsigned_pc1));
 
-            Into::<Unsigned<16>>::into(self.program_flash[Into::<Bitvector<16>>::into(halfword_pc)])
+            let pc_value0 = Ext::<16>::ext(Into::<Unsigned<8>>::into(self.program_flash[index0]));
+            let pc_value1 = Ext::<16>::ext(Into::<Unsigned<8>>::into(self.program_flash[index1]));
+
+            pc_value0 | pc_value1
         }
 
         fn extract_rs1(first_half_rest: Unsigned<4>, second_half: Unsigned<16>) -> Bitvector<5> {
@@ -1275,204 +1104,92 @@ pub mod machine_module {
         fn load(
             &self,
             state: &State,
-            input: &Input,
+            _input: &Input,
             rd: Bitvector<5>,
-            address: Unsigned<32>,
+            address: Unsigned<64>,
             funct3: Unsigned<3>,
-        ) -> BitvectorArray<5, 32> {
-            let mut is_halfword_or_word_load = Bitvector::<1>::new(0);
-            let mut is_word_load = Bitvector::<1>::new(0);
+        ) -> BitvectorArray<5, 64> {
+            // RV64I: the load type depends on funct3
+            // 000: byte (signed)
+            // 001: half-word (signed)
+            // 010: word (signed)
+            // 011: double word
+            // 100: byte (unsigned)
+            // 101: half-word (unsigned)
+            // 110: word (unsigned)
+            // 111: reserved
 
-            // handle byte and halfword loads and proper alignment
+            let is_signed = funct3 & Unsigned::<3>::new(0b100) != Unsigned::<3>::new(0);
+            let funct2 = Ext::<2>::ext(funct3);
+            let last_address = Self::load_store_last(address, funct2);
+            let mut load_value = Bitvector::<64>::new(0);
 
-            let extend_unsigned = funct3 & Unsigned::<3>::new(0x4);
-
-            let load_bits = funct3 & Unsigned::<3>::new(0x3);
-
-            if load_bits == Unsigned::<3>::new(0) {
-                // byte load
-            } else if load_bits == Unsigned::<3>::new(1) {
-                // halfword load, ensure alignment
-                if Ext::<1>::ext(address) != Unsigned::<1>::new(0) {
-                    panic!("Non-aligned halfword load");
-                }
-
-                is_halfword_or_word_load = Bitvector::<1>::new(1);
-            } else if load_bits == Unsigned::<3>::new(2) {
-                // word load, ensure alignment
-                if Ext::<2>::ext(address) != Unsigned::<2>::new(0) {
-                    panic!("Non-aligned word load");
-                }
-                // not permitted to use "unsigned extension" here
-                if extend_unsigned != Unsigned::<3>::new(0) {
-                    panic!("Word load with unsigned extension requested");
-                }
-
-                is_halfword_or_word_load = Bitvector::<1>::new(1);
-                is_word_load = Bitvector::<1>::new(1);
-            } else {
-                panic!("Unsupported load funct3");
-            }
-
-            let mut load_value = Bitvector::<32>::new(0);
-
-            if address < Unsigned::<32>::new(0x0002_0000) {
-                // program flash
-
-                let halfword_address =
-                    Into::<Bitvector<16>>::into(Ext::<16>::ext(address >> Unsigned::<32>::new(1)));
-
-                if address & Unsigned::<32>::new(1) == Unsigned::<32>::new(0) {
-                    let load_value0 = self.program_flash[halfword_address];
-                    let load_value1 =
-                        self.program_flash[halfword_address + Bitvector::<16>::new(1)];
-
-                    load_value = Self::combine_halfwords_le(load_value0, load_value1);
-                } else {
-                    // take the high byte of this, both bytes of next, and low byte of next-next
-                    let load_value0 = Into::<Bitvector<8>>::into(Ext::<8>::ext(
-                        Into::<Unsigned<16>>::into(self.program_flash[halfword_address])
-                            >> Unsigned::<16>::new(8),
-                    ));
-                    let load_value1 =
-                        Into::<Bitvector<8>>::into(Ext::<8>::ext(Into::<Unsigned<16>>::into(
-                            self.program_flash[halfword_address + Bitvector::<16>::new(1)],
-                        )));
-                    let load_value2 = Into::<Bitvector<8>>::into(Ext::<8>::ext(
-                        Into::<Unsigned<16>>::into(
-                            self.program_flash[halfword_address + Bitvector::<16>::new(1)],
-                        ) >> Unsigned::<16>::new(8),
-                    ));
-                    let load_value3 =
-                        Into::<Bitvector<8>>::into(Ext::<8>::ext(Into::<Unsigned<16>>::into(
-                            self.program_flash[halfword_address + Bitvector::<16>::new(2)],
-                        )));
-                    load_value =
-                        Self::combine_bytes_le(load_value0, load_value1, load_value2, load_value3);
-                }
-            } else if address >= Unsigned::<32>::new(0x2000_4000)
-                && address < Unsigned::<32>::new(0x2000_7000)
+            if address >= Unsigned::<64>::new(0x2000_4000)
+                && last_address < Unsigned::<64>::new(0x2000_7000)
             {
                 // SRAM parity
                 let relative_address = Into::<Bitvector<14>>::into(Ext::<14>::ext(
-                    address - Unsigned::<32>::new(0x2000_4000),
+                    address - Unsigned::<64>::new(0x2000_4000),
                 ));
 
-                let load_value0 = state.sram_parity[relative_address];
-                let load_value1 = state.sram_parity[relative_address + Bitvector::<14>::new(1)];
-                let load_value2 = state.sram_parity[relative_address + Bitvector::<14>::new(2)];
-                let load_value3 = state.sram_parity[relative_address + Bitvector::<14>::new(3)];
-
-                load_value =
-                    Self::combine_bytes_le(load_value0, load_value1, load_value2, load_value3);
-            } else if address >= Unsigned::<32>::new(0xE200_1000)
-                && address < Unsigned::<32>::new(0xE200_10CC)
-            {
-                // CLIC
-                let relative_address = Into::<Bitvector<8>>::into(Ext::<8>::ext(
-                    address - Unsigned::<32>::new(0xE200_1000),
-                ));
-                let load_value0 = state.clicint[relative_address];
-                let load_value1 = state.clicint[relative_address + Bitvector::<8>::new(1)];
-                let load_value2 = state.clicint[relative_address + Bitvector::<8>::new(2)];
-                let load_value3 = state.clicint[relative_address + Bitvector::<8>::new(3)];
-
-                load_value =
-                    Self::combine_bytes_le(load_value0, load_value1, load_value2, load_value3);
-            } else if address >= Unsigned::<32>::new(0x4004_0000)
-                && address < Unsigned::<32>::new(0x4004_00A0)
-            {
-                // I/O port registers
-                let relative_address = address - Unsigned::<32>::new(0x4004_0000);
-
-                let port_number = Into::<Bitvector<3>>::into(Ext::<3>::ext(
-                    relative_address >> Unsigned::<32>::new(5),
-                ));
-                let port_register_word =
-                    (relative_address & Unsigned::<32>::new(0x1F)) >> Unsigned::<32>::new(2);
-
-                let port_register_halfword =
-                    Ext::<1>::ext((relative_address) >> Unsigned::<32>::new(1));
-
-                // for some reason, the I/O port registers are organised as if big-endian
-
-                if port_register_word == Unsigned::<32>::new(0) {
-                    // PCNTR1
-                    // PDR is low, PODR is high
-
-                    if is_word_load == Bitvector::<1>::new(1) {
-                        load_value = Self::combine_halfwords_le(
-                            state.PDR[port_number],
-                            state.PODR[port_number],
-                        );
-                    } else if is_halfword_or_word_load == Bitvector::<1>::new(1) {
-                        if port_register_halfword == Unsigned::<1>::new(0) {
-                            // PODR has halfword offset 0
-                            load_value = Self::halfword_uext(state.PODR[port_number]);
+                // load little-endian
+                bitmask_switch!(funct2 {
+                    "00" => {
+                        // byte
+                        let byte0 = state.sram_parity[relative_address];
+                        if is_signed {
+                            load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<8>>::into(byte0)));
                         } else {
-                            // PDR has halfword offset 1
-                            load_value = Self::halfword_uext(state.PDR[port_number]);
+                            load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Unsigned<8>>::into(byte0)));
                         }
-                    } else {
-                        unimplemented!("PCNTR1 byte load");
                     }
-                } else if port_register_word == Unsigned::<32>::new(1) {
-                    // PCNTR2
-                    // low halfword is PIDR
-                    // high halfword is EIDR (but no events can be enabled in this description, so is all zeros)
-
-                    if is_word_load == Bitvector::<1>::new(1) {
-                        load_value = Self::halfword_uext(input.PIDR[port_number]);
-                    } else if is_halfword_or_word_load == Bitvector::<1>::new(1) {
-                        if port_register_halfword == Unsigned::<1>::new(0) {
-                            // EIDR has halfword offset 0
-                            load_value = Bitvector::<32>::new(0);
+                    "01" => {
+                        // halfword
+                        let byte0 = state.sram_parity[relative_address];
+                        let byte1 = state.sram_parity[relative_address + Bitvector::<14>::new(1)];
+                        let halfword: Bitvector<16> = Self::halfword_from_bytes(byte0, byte1);
+                        if is_signed {
+                            load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<16>>::into(halfword)));
                         } else {
-                            // PIDR has halfword offset 1
-                            load_value = Self::halfword_uext(input.PIDR[port_number]);
+                            load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Unsigned<16>>::into(halfword)));
                         }
-                    } else {
-                        unimplemented!("PCNTR2 byte load");
                     }
-                } else {
-                    unimplemented!("Load of given I/O register");
-                }
+                    "10" => {
+                        // word
+                        let byte0 = state.sram_parity[relative_address];
+                        let byte1 = state.sram_parity[relative_address + Bitvector::<14>::new(1)];
+                        let byte2 = state.sram_parity[relative_address + Bitvector::<14>::new(2)];
+                        let byte3 = state.sram_parity[relative_address + Bitvector::<14>::new(3)];
+                        let word: Bitvector<32> = Self::word_from_bytes(byte0, byte1, byte2, byte3);
+                        if is_signed {
+                            load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<32>>::into(word)));
+                        } else {
+                            load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Unsigned<32>>::into(word)));
+                        }
+                    }
+                    "11" => {
+                        // double word
+                        let byte0 = state.sram_parity[relative_address];
+                        let byte1 = state.sram_parity[relative_address + Bitvector::<14>::new(1)];
+                        let byte2 = state.sram_parity[relative_address + Bitvector::<14>::new(2)];
+                        let byte3 = state.sram_parity[relative_address + Bitvector::<14>::new(3)];
+                        let byte4 = state.sram_parity[relative_address + Bitvector::<14>::new(4)];
+                        let byte5 = state.sram_parity[relative_address + Bitvector::<14>::new(5)];
+                        let byte6 = state.sram_parity[relative_address + Bitvector::<14>::new(6)];
+                        let byte7 = state.sram_parity[relative_address + Bitvector::<14>::new(7)];
+
+                        let word0: Bitvector<32> = Self::word_from_bytes(byte0, byte1, byte2, byte3);
+                        let word1: Bitvector<32> = Self::word_from_bytes(byte4, byte5, byte6, byte7);
+                        let dword: Bitvector<64> = Self::dword_from_words(word0, word1);
+                        if is_signed {
+                            load_value = dword;
+                        } else {
+                            unimplemented!("Load with funct3 = 7");
+                        }
+                    }
+                });
             } else {
                 unimplemented!("Load at given address");
-            }
-
-            // appropriately narrow and extend
-
-            if is_word_load == Bitvector::<1>::new(1) {
-                // word load
-                // do nothing here
-            } else if is_halfword_or_word_load == Bitvector::<1>::new(1) {
-                // halfword load
-                // narrow to 16 bits and extend appropriately
-                let load_halfword = Ext::<16>::ext(Into::<Unsigned<32>>::into(load_value));
-
-                if extend_unsigned != Unsigned::<3>::new(0) {
-                    // unsigned, zero-extend low halfword
-                    load_value = Into::<Bitvector<32>>::into(Ext::<32>::ext(load_halfword));
-                } else {
-                    // signed, msb-extend low halfword
-                    load_value = Into::<Bitvector<32>>::into(Ext::<32>::ext(
-                        Into::<Signed<16>>::into(load_halfword),
-                    ));
-                }
-            } else {
-                // byte load
-                let load_byte = Ext::<8>::ext(Into::<Unsigned<32>>::into(load_value));
-
-                if extend_unsigned != Unsigned::<3>::new(0) {
-                    // unsigned, zero-extend low byte
-                    load_value = Into::<Bitvector<32>>::into(Ext::<32>::ext(load_byte));
-                } else {
-                    // signed, msb-extend low byte
-                    load_value = Into::<Bitvector<32>>::into(Ext::<32>::ext(
-                        Into::<Signed<8>>::into(load_byte),
-                    ));
-                }
             }
 
             // load the value into the register if it is nonzero
@@ -1486,124 +1203,84 @@ pub mod machine_module {
 
         fn store(
             state: &State,
-            address: Unsigned<32>,
-            store_value: Bitvector<32>,
+            address: Unsigned<64>,
+            store_value: Bitvector<64>,
             funct3: Unsigned<3>,
         ) -> State {
-            let mut store_halfword_or_word = Bitvector::<1>::new(0);
-            let mut store_word = Bitvector::<1>::new(0);
+            // RV64I: the store type depends on funct3
+            // 000: byte (signed)
+            // 001: half-word (signed)
+            // 010: word (signed)
+            // 011: double word
+            // 100: byte (unsigned)
+            // 101: half-word (unsigned)
+            // 110: word (unsigned)
+            // 111: reserved
 
-            let unsigned_store_value = Into::<Unsigned<32>>::into(store_value);
-
-            let halfword_low = Into::<Bitvector<16>>::into(Ext::<16>::ext(unsigned_store_value));
-
-            let byte0 = Into::<Bitvector<8>>::into(Ext::<8>::ext(unsigned_store_value));
-            let byte1 = Into::<Bitvector<8>>::into(Ext::<8>::ext(
-                unsigned_store_value >> Unsigned::<32>::new(8),
-            ));
-            let byte2 = Into::<Bitvector<8>>::into(Ext::<8>::ext(
-                unsigned_store_value >> Unsigned::<32>::new(16),
-            ));
-            let byte3 = Into::<Bitvector<8>>::into(Ext::<8>::ext(
-                unsigned_store_value >> Unsigned::<32>::new(24),
-            ));
-
-            if funct3 == Unsigned::<3>::new(0) {
-                // byte store
-            } else if funct3 == Unsigned::<3>::new(1) {
-                // halfword store, ensure alignment
-                if Ext::<1>::ext(address) != Unsigned::<1>::new(0) {
-                    panic!("Non-aligned halfword store");
-                }
-
-                store_halfword_or_word = Bitvector::<1>::new(1);
-            } else if funct3 == Unsigned::<3>::new(2) {
-                // word store, ensure alignment
-                if Ext::<2>::ext(address) != Unsigned::<2>::new(0) {
-                    panic!("Non-aligned word store");
-                }
-
-                store_halfword_or_word = Bitvector::<1>::new(1);
-                store_word = Bitvector::<1>::new(1);
+            if funct3 & Unsigned::<3>::new(0b100) != Unsigned::<3>::new(0) {
+                unimplemented!("Store with highest byte of funct3 set");
             }
+            let funct2 = Ext::<2>::ext(funct3);
+            let last_address = Self::load_store_last(address, funct2);
+            let store_unsigned = Into::<Unsigned<64>>::into(store_value);
 
             let mut sram_parity = Clone::clone(&state.sram_parity);
-            let mut clicint = Clone::clone(&state.clicint);
-            let mut PODR = Clone::clone(&state.PODR);
-            let mut PDR = Clone::clone(&state.PDR);
 
-            if address >= Unsigned::<32>::new(0x2000_4000)
-                && address < Unsigned::<32>::new(0x2000_7000)
+            if address >= Unsigned::<64>::new(0x2000_4000)
+                && last_address < Unsigned::<64>::new(0x2000_7000)
             {
+                // SRAM parity
                 let relative_address = Into::<Bitvector<14>>::into(Ext::<14>::ext(
-                    address - Unsigned::<32>::new(0x2000_4000),
+                    address - Unsigned::<64>::new(0x2000_4000),
                 ));
 
-                sram_parity[relative_address] = byte0;
-
-                if store_halfword_or_word == Bitvector::<1>::new(1) {
-                    sram_parity[relative_address + Bitvector::<14>::new(1)] = byte1;
-                }
-                if store_word == Bitvector::<1>::new(1) {
-                    sram_parity[relative_address + Bitvector::<14>::new(2)] = byte2;
-                    sram_parity[relative_address + Bitvector::<14>::new(3)] = byte3;
-                }
-            } else if address >= Unsigned::<32>::new(0xE200_1000)
-                && address < Unsigned::<32>::new(0xE200_10CC)
-            {
-                // CLIC
-                let relative_address = Into::<Bitvector<8>>::into(Ext::<8>::ext(
-                    address - Unsigned::<32>::new(0xE200_1000),
-                ));
-
-                clicint[relative_address] = byte0;
-
-                if store_halfword_or_word == Bitvector::<1>::new(1) {
-                    clicint[relative_address + Bitvector::<8>::new(1)] = byte1;
-                }
-                if store_word == Bitvector::<1>::new(1) {
-                    clicint[relative_address + Bitvector::<8>::new(2)] = byte2;
-                    clicint[relative_address + Bitvector::<8>::new(3)] = byte3;
-                }
-            } else if address >= Unsigned::<32>::new(0x4004_0000)
-                && address < Unsigned::<32>::new(0x4004_00A0)
-            {
-                // I/O port registers
-                let relative_address = address - Unsigned::<32>::new(0x4004_0000);
-
-                let port = Into::<Bitvector<3>>::into(Ext::<3>::ext(
-                    relative_address >> Unsigned::<32>::new(5),
-                ));
-                let port_reg_word =
-                    (relative_address & Unsigned::<32>::new(0x1F)) >> Unsigned::<32>::new(2);
-                let port_reg_offset = Ext::<2>::ext(relative_address);
-
-                // for some reason, the I/O port registers are organised as if big-endian
-                // construct a word first and then split it as big endian
-
-                if port_reg_word == Unsigned::<32>::new(0) {
-                    // PCNTR1
-
-                    if store_word == Bitvector::<1>::new(1) {
-                        unimplemented!("Store of PNCTR1 word");
-                    } else if store_halfword_or_word == Bitvector::<1>::new(1) {
-                        // store the low halfword from the register
-                        let store_value = halfword_low;
-
-                        // must be aligned to word
-                        if port_reg_offset == Unsigned::<2>::new(0) {
-                            // PODR
-                            PODR[port] = store_value;
-                        } else {
-                            // PDR
-                            PDR[port] = store_value;
-                        }
-                    } else {
-                        unimplemented!("Store of PNCTR1 byte");
+                // store little-endian
+                bitmask_switch!(funct2 {
+                    "00" => {
+                        // byte
+                        sram_parity[relative_address] = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
                     }
-                } else {
-                    unimplemented!("Store of given I/O register");
-                }
+                    "01" => {
+                        // halfword
+                        let byte0 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
+                        let byte1 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(8)));
+
+                        sram_parity[relative_address] = byte0;
+                        sram_parity[relative_address + Bitvector::<14>::new(1)] = byte1;
+                    }
+                    "10" => {
+                        // word
+                        let byte0 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
+                        let byte1 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(8)));
+                        let byte2 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(16)));
+                        let byte3 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(24)));
+
+                        sram_parity[relative_address] = byte0;
+                        sram_parity[relative_address + Bitvector::<14>::new(1)] = byte1;
+                        sram_parity[relative_address + Bitvector::<14>::new(2)] = byte2;
+                        sram_parity[relative_address + Bitvector::<14>::new(3)] = byte3;
+                    }
+                    "11" => {
+                        // double word
+                        let byte0 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
+                        let byte1 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(8)));
+                        let byte2 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(16)));
+                        let byte3 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(24)));
+                        let byte4 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(32)));
+                        let byte5 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(40)));
+                        let byte6 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(48)));
+                        let byte7 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(56)));
+
+                        sram_parity[relative_address] = byte0;
+                        sram_parity[relative_address + Bitvector::<14>::new(1)] = byte1;
+                        sram_parity[relative_address + Bitvector::<14>::new(2)] = byte2;
+                        sram_parity[relative_address + Bitvector::<14>::new(3)] = byte3;
+                        sram_parity[relative_address + Bitvector::<14>::new(4)] = byte4;
+                        sram_parity[relative_address + Bitvector::<14>::new(5)] = byte5;
+                        sram_parity[relative_address + Bitvector::<14>::new(6)] = byte6;
+                        sram_parity[relative_address + Bitvector::<14>::new(7)] = byte7;
+                    }
+                });
             } else {
                 unimplemented!("Store at given address");
             }
@@ -1612,143 +1289,62 @@ pub mod machine_module {
                 PC: state.PC,
                 reg: Clone::clone(&state.reg),
                 sram_parity,
-                clicint,
-                PODR,
-                PDR,
-                CSR_mtvec: Clone::clone(&state.CSR_mtvec),
-                CSR_mtvt: Clone::clone(&state.CSR_mtvt),
             }
         }
 
-        fn combine_bytes_le(
-            load_value0: Bitvector<8>,
-            load_value1: Bitvector<8>,
-            load_value2: Bitvector<8>,
-            load_value3: Bitvector<8>,
+        fn halfword_from_bytes(byte0: Bitvector<8>, byte1: Bitvector<8>) -> Bitvector<16> {
+            let byte0_placed = Ext::<16>::ext(Into::<Unsigned<8>>::into(byte0));
+            let byte1_placed =
+                Ext::<16>::ext(Into::<Unsigned<8>>::into(byte1)) << Unsigned::<16>::new(8);
+
+            Into::<Bitvector<16>>::into(byte0_placed | byte1_placed)
+        }
+
+        fn word_from_bytes(
+            byte0: Bitvector<8>,
+            byte1: Bitvector<8>,
+            byte2: Bitvector<8>,
+            byte3: Bitvector<8>,
         ) -> Bitvector<32> {
-            let load_value0_placed = Ext::<32>::ext(Into::<Unsigned<8>>::into(load_value0));
-            let load_value1_placed =
-                Ext::<32>::ext(Into::<Unsigned<8>>::into(load_value1)) << Unsigned::<32>::new(8);
-            let load_value2_placed =
-                Ext::<32>::ext(Into::<Unsigned<8>>::into(load_value2)) << Unsigned::<32>::new(16);
-            let load_value3_placed =
-                Ext::<32>::ext(Into::<Unsigned<8>>::into(load_value3)) << Unsigned::<32>::new(24);
+            let byte0_placed = Ext::<32>::ext(Into::<Unsigned<8>>::into(byte0));
+            let byte1_placed =
+                Ext::<32>::ext(Into::<Unsigned<8>>::into(byte1)) << Unsigned::<32>::new(8);
+            let byte2_placed =
+                Ext::<32>::ext(Into::<Unsigned<8>>::into(byte2)) << Unsigned::<32>::new(16);
+            let byte3_placed =
+                Ext::<32>::ext(Into::<Unsigned<8>>::into(byte3)) << Unsigned::<32>::new(24);
 
-            Into::<Bitvector<32>>::into(
-                load_value0_placed | load_value1_placed | load_value2_placed | load_value3_placed,
-            )
+            Into::<Bitvector<32>>::into(byte0_placed | byte1_placed | byte2_placed | byte3_placed)
         }
 
-        fn combine_halfwords_le(
-            load_halfword0: Bitvector<16>,
-            load_halfword1: Bitvector<16>,
-        ) -> Bitvector<32> {
-            let load_halfword0_placed = Ext::<32>::ext(Into::<Unsigned<16>>::into(load_halfword0));
-            let load_halfword1_placed = Ext::<32>::ext(Into::<Unsigned<16>>::into(load_halfword1))
-                << Unsigned::<32>::new(16);
+        fn dword_from_words(load_word0: Bitvector<32>, load_word1: Bitvector<32>) -> Bitvector<64> {
+            let load_word0_placed = Ext::<64>::ext(Into::<Unsigned<32>>::into(load_word0));
+            let load_word1_placed =
+                Ext::<64>::ext(Into::<Unsigned<32>>::into(load_word1)) << Unsigned::<64>::new(32);
 
-            Into::<Bitvector<32>>::into(load_halfword0_placed | load_halfword1_placed)
+            Into::<Bitvector<64>>::into(load_word0_placed | load_word1_placed)
         }
 
-        fn halfword_uext(halfword: Bitvector<16>) -> Bitvector<32> {
-            let halfword_placed = Ext::<32>::ext(Into::<Unsigned<16>>::into(halfword));
-            Into::<Bitvector<32>>::into(halfword_placed)
-        }
-
-        fn initial_clicint() -> BitvectorArray<8, 8> {
-            // CLIC registers are usually zero
-            // except for clicintattr (byte 2 of each), which is 0xC2
-            // and clicintctl (byte 3 of each), which is 0x0F
-
-            let clicint = BitvectorArray::<8, 8>::new_filled(Bitvector::<8>::new(0));
-
-            // there are 51 used CLIC registers on the chip
-            // but since we have a 64-element array, we will just init all
-            // the last ones will not be interacted with
-
-            // since machine-check does not support loops currently,
-            // just call an 8-element init function 8 times
-            let clicint = Self::init_clicint_8(clicint, Bitvector::<8>::new(0));
-            let clicint = Self::init_clicint_8(clicint, Bitvector::<8>::new(8));
-            let clicint = Self::init_clicint_8(clicint, Bitvector::<8>::new(16));
-            let clicint = Self::init_clicint_8(clicint, Bitvector::<8>::new(24));
-            let clicint = Self::init_clicint_8(clicint, Bitvector::<8>::new(32));
-            let clicint = Self::init_clicint_8(clicint, Bitvector::<8>::new(40));
-            let clicint = Self::init_clicint_8(clicint, Bitvector::<8>::new(48));
-            let clicint = Self::init_clicint_8(clicint, Bitvector::<8>::new(56));
-
-            clicint
-        }
-
-        fn init_clicint_8(
-            clicint: BitvectorArray<8, 8>,
-            start_index: Bitvector<8>,
-        ) -> BitvectorArray<8, 8> {
-            let four: Bitvector<8> = Bitvector::<8>::new(4);
-
-            let mut clicint_a = clicint;
-
-            // CLIC registers are usually zero
-            // except for clicintattr (byte 2 of each), which is 0xC2
-            // and clicintctl (byte 3 of each), which is 0x0F
-
-            clicint_a[(start_index + Bitvector::<8>::new(0)) * four + Bitvector::<8>::new(2)] =
-                Bitvector::<8>::new(0xC2);
-            clicint_a[(start_index + Bitvector::<8>::new(1)) * four + Bitvector::<8>::new(2)] =
-                Bitvector::<8>::new(0xC2);
-            clicint_a[(start_index + Bitvector::<8>::new(2)) * four + Bitvector::<8>::new(2)] =
-                Bitvector::<8>::new(0xC2);
-            clicint_a[(start_index + Bitvector::<8>::new(3)) * four + Bitvector::<8>::new(2)] =
-                Bitvector::<8>::new(0xC2);
-            clicint_a[(start_index + Bitvector::<8>::new(4)) * four + Bitvector::<8>::new(2)] =
-                Bitvector::<8>::new(0xC2);
-            clicint_a[(start_index + Bitvector::<8>::new(5)) * four + Bitvector::<8>::new(2)] =
-                Bitvector::<8>::new(0xC2);
-            clicint_a[(start_index + Bitvector::<8>::new(6)) * four + Bitvector::<8>::new(2)] =
-                Bitvector::<8>::new(0xC2);
-            clicint_a[(start_index + Bitvector::<8>::new(7)) * four + Bitvector::<8>::new(2)] =
-                Bitvector::<8>::new(0xC2);
-
-            clicint_a[(start_index + Bitvector::<8>::new(0)) * four + Bitvector::<8>::new(3)] =
-                Bitvector::<8>::new(0x0F);
-            clicint_a[(start_index + Bitvector::<8>::new(1)) * four + Bitvector::<8>::new(3)] =
-                Bitvector::<8>::new(0x0F);
-            clicint_a[(start_index + Bitvector::<8>::new(2)) * four + Bitvector::<8>::new(3)] =
-                Bitvector::<8>::new(0x0F);
-            clicint_a[(start_index + Bitvector::<8>::new(3)) * four + Bitvector::<8>::new(3)] =
-                Bitvector::<8>::new(0x0F);
-            clicint_a[(start_index + Bitvector::<8>::new(4)) * four + Bitvector::<8>::new(3)] =
-                Bitvector::<8>::new(0x0F);
-            clicint_a[(start_index + Bitvector::<8>::new(5)) * four + Bitvector::<8>::new(3)] =
-                Bitvector::<8>::new(0x0F);
-            clicint_a[(start_index + Bitvector::<8>::new(6)) * four + Bitvector::<8>::new(3)] =
-                Bitvector::<8>::new(0x0F);
-            clicint_a[(start_index + Bitvector::<8>::new(7)) * four + Bitvector::<8>::new(3)] =
-                Bitvector::<8>::new(0x0F);
-
-            clicint_a
-        }
-
-        fn csr_write_value(
-            csr_rs: Bitvector<1>,
-            csr_rc: Bitvector<1>,
-            read_value: Bitvector<32>,
-            write_value: Bitvector<32>,
-        ) -> Bitvector<32> {
-            let result;
-            if csr_rs == Bitvector::<1>::new(1) {
-                // take the read_value and set the bits that are set in write_value
-                result = read_value | write_value;
-            } else if csr_rc == Bitvector::<1>::new(1) {
-                // take the read_value and clear the bits that are set in write_value
-                result = read_value & !write_value;
-            } else {
-                // normal write
-                result = write_value;
-            }
-            result
+        fn load_store_last(address: Unsigned<64>, funct2: Unsigned<2>) -> Unsigned<64> {
+            let mut last_address = address;
+            bitmask_switch!(funct2 {
+                "00" => {
+                    // byte
+                }
+                "01" => {
+                    // halfword
+                    last_address = last_address + Unsigned::<64>::new(1);
+                }
+                "10" => {
+                    // word
+                    last_address = last_address + Unsigned::<64>::new(3);
+                }
+                "11" => {
+                    // double word
+                    last_address = last_address + Unsigned::<64>::new(7);
+                }
+            });
+            last_address
         }
     }
 }
-
-pub use machine_module::System;
