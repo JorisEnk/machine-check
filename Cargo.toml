@@ -1,7 +1,7 @@
 [workspace]
 
 resolver = "2"
-members = ["core/*", "macros/*", "transpile/*", "systems/*"]
+members = ["core/*", "macros/*", "transpile/*", "systems/*", "my-example"]
 
 
 [patch.crates-io]

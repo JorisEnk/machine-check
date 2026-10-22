@@ -32,25 +32,29 @@ pub mod machine_module {
         /// Register 0 is always zero.
         reg: BitvectorArray<5, 64>,
 
+
+        // should i add here the SRAM with the machine code parsed from the .elf?
+
         /// Onboard SRAM (Parity), 0x2000_4000..0x2000_7000
         ///
         /// this means there are 12288 bytes
         /// use a 14-bit array (16384) with further bounds checking
-        sram_parity: BitvectorArray<14, 8>,
+        sram_dynamic: BitvectorArray<14, 8>,
+
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
     pub struct System {
         /// Program flash, 0x0000_0000..0x0002_0000
         ///
-        /// stored as bytes
-        pub program_flash: BitvectorArray<17, 8>,
+        /// here stored as little-endian halfwords
+        pub sram_static: BitvectorArray<17, 8>,
+        pub sram_dynamic:BitvectorArray<17, 8>,
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
     pub struct Param {
         pub reg: BitvectorArray<5, 64>,
-        pub sram_parity: BitvectorArray<14, 8>,
     }
 
     impl ::machine_check::Machine for System {
@@ -64,18 +68,19 @@ pub mod machine_module {
             reg[Bitvector::<5>::new(0)] = Bitvector::<64>::new(0);
 
             // SRAM data is undefined after power-on
-            let sram_parity = Clone::clone(&param.sram_parity);
+            let sram_dynamic = Clone::clone(&self.sram_dynamic);
 
             State {
                 // Program Counter starts at zero
                 PC: Bitvector::<64>::new(0),
                 reg,
-                sram_parity,
+                sram_dynamic,
             }
         }
 
         fn next(&self, state: &State, input: &Input, param: &Param) -> State {
             // fetch first instruction halfword
+            // gets from flash so new methode here as well?
             let first_half: Unsigned<16> = Self::pc_halfword(self, state.PC);
             let opcode_low = Ext::<2>::ext(first_half);
             let first_half_1 = first_half >> Unsigned::<16>::new(2);
@@ -728,6 +733,7 @@ pub mod machine_module {
             State {
                 PC,
                 reg,
+                // here than again sram?
                 sram_parity,
             }
         }

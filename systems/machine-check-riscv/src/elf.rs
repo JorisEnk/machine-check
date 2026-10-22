@@ -20,6 +20,8 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
 
     // program flash
     // 0x0000_0000..0x0002_0000 (17 bits)
+        // change index here to 20-1 "20 adress bits"
+    // let mut sram_static = BitvectorArray::<18, 16>::new_filled(halfword_zero);
     let mut program_flash = BitvectorArray::<17, 8>::new_filled(byte_zero);
 
     // load the program flash from program headers
@@ -42,8 +44,10 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
             .expect("Program header data should be present");
 
         match address {
+            // to do chnage daress
             0x0000_0000..0x0002_0000 => {
                 // load into program flash
+
                 for value in data {
                     program_flash[Bitvector::new(address as u64)] =
                         Bitvector::<8>::new(*value as u64);
@@ -85,8 +89,8 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
 
         log::debug!("Usable symbols: {:#X?}", usable);
     }
-
-    let system = System { program_flash };
+    // also
+    let system = System { sram_static, sram_dynamic };
 
     Ok((system, symbols))
 }
