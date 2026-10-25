@@ -48,8 +48,9 @@ pub mod machine_module {
         /// Program flash, 0x0000_0000..0x0002_0000
         ///
         /// here stored as little-endian halfwords
-        pub sram_static: BitvectorArray<17, 8>,
-        pub sram_dynamic:BitvectorArray<17, 8>,
+        pub sram_static: BitvectorArray<14, 8>,
+        pub sram_dynamic:BitvectorArray<14, 8>,
+        pub pc_entry:Bitvector<64>,
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -69,10 +70,11 @@ pub mod machine_module {
 
             // SRAM data is undefined after power-on
             let sram_dynamic = Clone::clone(&self.sram_dynamic);
+            let PC = Clone::clone(&self.pc_entry);
 
             State {
                 // Program Counter starts at zero
-                PC: Bitvector::<64>::new(0),
+                PC,
                 reg,
                 sram_dynamic,
             }
@@ -92,7 +94,7 @@ pub mod machine_module {
             let mut next_state = State {
                 PC,
                 reg: Clone::clone(&state.reg),
-                sram_parity: Clone::clone(&state.sram_parity),
+                sram_dynamic: Clone::clone(&state.sram_dynamic),
             };
 
             // perform instruction according to quadrant
@@ -144,7 +146,7 @@ pub mod machine_module {
             let first_half_rest = Ext::<4>::ext(first_half_noncomp >> Unsigned::<14>::new(10));
 
             let mut reg = Clone::clone(&state.reg);
-            let mut sram_parity = Clone::clone(&state.sram_parity);
+            let mut sram_dynamic= Clone::clone(&state.sram_dynamic);
 
             // RV64I implemented here
 
@@ -518,7 +520,7 @@ pub mod machine_module {
 
                     let store_result: State = Self::store(state, address, store_value, funct3);
                     reg = Clone::clone(&store_result.reg);
-                    sram_parity = Clone::clone(&store_result.sram_parity);
+                    sram_dynamic = Clone::clone(&store_result.sram_dynamic);
                 }
                 "11000" => {
                     // B-type branch
@@ -733,8 +735,7 @@ pub mod machine_module {
             State {
                 PC,
                 reg,
-                // here than again sram?
-                sram_parity,
+                sram_dynamic,
             }
         }
 
@@ -746,7 +747,7 @@ pub mod machine_module {
             opcode_instr: Unsigned<14>,
         ) -> State {
             let mut reg = Clone::clone(&state.reg);
-            let mut sram_parity = Clone::clone(&state.sram_parity);
+            let mut sram_dynamic = Clone::clone(&state.sram_dynamic);
 
             // all C extension instructions in this quadrant (0) implemented
 
@@ -828,7 +829,7 @@ pub mod machine_module {
 
                         let store_result: State = Self::store(state, address, store_value, funct3);
                         reg = Clone::clone(&store_result.reg);
-                        sram_parity = Clone::clone(&store_result.sram_parity);
+                        sram_dynamic = Clone::clone(&store_result.sram_dynamic);
                     }
                 }
                 "q11_uuu_sss_uu_ddd" => {
@@ -868,7 +869,7 @@ pub mod machine_module {
 
                         let store_result: State = Self::store(state, address, store_value, funct3);
                         reg = Clone::clone(&store_result.reg);
-                        sram_parity = Clone::clone(&store_result.sram_parity);
+                        sram_dynamic = Clone::clone(&store_result.sram_dynamic);
                     }
                 }
 
@@ -878,7 +879,7 @@ pub mod machine_module {
             State {
                 PC: state.PC,
                 reg,
-                sram_parity,
+                sram_dynamic,
             }
         }
 
@@ -892,7 +893,7 @@ pub mod machine_module {
             let mut reg = Clone::clone(&state.reg);
 
             let mut PC = state.PC;
-            let sram_parity = Clone::clone(&state.sram_parity);
+            let sram_dynamic = Clone::clone(&state.sram_dynamic);
 
             // all C extension instructions in this quadrant (1) implemented
 
@@ -1098,7 +1099,7 @@ pub mod machine_module {
             State {
                 PC,
                 reg,
-                sram_parity,
+                sram_dynamic,
             }
         }
 
@@ -1111,7 +1112,7 @@ pub mod machine_module {
         ) -> State {
             let mut PC = state.PC;
             let mut reg = Clone::clone(&state.reg);
-            let mut sram_parity = Clone::clone(&state.sram_parity);
+            let mut sram_dynamic = Clone::clone(&state.sram_dynamic);
 
             // all C extension instructions in this quadrant (2) implemented
 
@@ -1253,7 +1254,7 @@ pub mod machine_module {
                     let store_value = reg[s];
                     let store_result: State = Self::store(state, address, store_value, funct3);
                     reg = Clone::clone(&store_result.reg);
-                    sram_parity = Clone::clone(&store_result.sram_parity);
+                    sram_dynamic = Clone::clone(&store_result.sram_dynamic);
 
                 }
                 "111_u_uuuuu_sssss" => {
@@ -1277,7 +1278,7 @@ pub mod machine_module {
                     let store_value = reg[s];
                     let store_result: State = Self::store(state, address, store_value, funct3);
                     reg = Clone::clone(&store_result.reg);
-                    sram_parity = Clone::clone(&store_result.sram_parity);
+                    sram_dynamic = Clone::clone(&store_result.sram_dynamic);
 
                 }
                 _ => unimplemented!("Given instruction in compressed quadrant 2")
@@ -1286,28 +1287,36 @@ pub mod machine_module {
             State {
                 PC,
                 reg,
-                sram_parity,
+                sram_dynamic,
             }
         }
 
         fn pc_halfword(&self, PC: Bitvector<64>) -> Unsigned<16> {
+            // first byte of PC
             let unsigned_pc0: Unsigned<64> = Into::<Unsigned<64>>::into(PC);
+            // second byte of PC
             let unsigned_pc1: Unsigned<64> =
                 Into::<Unsigned<64>>::into(PC + Bitvector::<64>::new(1));
-            // only fetching from flash is supported
-            if unsigned_pc0 >> Unsigned::<64>::new(17) != Unsigned::<64>::new(0)
-                || unsigned_pc1 >> Unsigned::<64>::new(17) != Unsigned::<64>::new(0)
+            // only fetching from sram_static is supported (0x2000_0000 - 0x2000_4000 )
+            if unsigned_pc0 < Unsigned::<64>::new(0x2000_0000)
+                || unsigned_pc0 >= Unsigned::<64>::new(0x2000_4000)
+                || unsigned_pc1 < Unsigned::<64>::new(0x2000_0000)
+                || unsigned_pc1 >= Unsigned::<64>::new(0x2000_4000)
             {
-                unimplemented!("Program Counter not within program flash");
+                unimplemented!("Program Counter not within SRAM_STATIC");
             }
+            // index 14 is needed because of sram_static size (0x4000) only takes lower 14 bits
+            let index0 = Into::<Bitvector<14>>::into(Ext::<14>::ext(unsigned_pc0));
+            let index1 = Into::<Bitvector<14>>::into(Ext::<14>::ext(unsigned_pc1));
 
-            let index0 = Into::<Bitvector<17>>::into(Ext::<17>::ext(unsigned_pc0));
-            let index1 = Into::<Bitvector<17>>::into(Ext::<17>::ext(unsigned_pc1));
 
-            let pc_value0 = Ext::<16>::ext(Into::<Unsigned<8>>::into(self.program_flash[index0]));
-            let pc_value1 = Ext::<16>::ext(Into::<Unsigned<8>>::into(self.program_flash[index1]));
+            // not sure if here sram_static or dynamic would say static
+            let pc_value0 = Ext::<16>::ext(Into::<Unsigned<8>>::into(self.sram_static[index0]));
 
-            pc_value0 | pc_value1
+            // have to shift here for higher byte of PC
+            let pc_value1 = Ext::<16>::ext(Into::<Unsigned<8>>::into(self.sram_static[index1])) << Unsigned::<16>::new(8);
+
+            pc_value0 | pc_value1 
         }
 
         fn extract_rs1(first_half_rest: Unsigned<4>, second_half: Unsigned<16>) -> Bitvector<5> {
@@ -1375,7 +1384,7 @@ pub mod machine_module {
                 bitmask_switch!(funct2 {
                     "00" => {
                         // byte
-                        let byte0 = state.sram_parity[relative_address];
+                        let byte0 = state.sram_dynamic[relative_address];
                         if is_signed {
                             load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<8>>::into(byte0)));
                         } else {
@@ -1384,8 +1393,8 @@ pub mod machine_module {
                     }
                     "01" => {
                         // halfword
-                        let byte0 = state.sram_parity[relative_address];
-                        let byte1 = state.sram_parity[relative_address + Bitvector::<14>::new(1)];
+                        let byte0 = state.sram_dynamic[relative_address];
+                        let byte1 = state.sram_dynamic[relative_address + Bitvector::<14>::new(1)];
                         let halfword: Bitvector<16> = Self::halfword_from_bytes(byte0, byte1);
                         if is_signed {
                             load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<16>>::into(halfword)));
@@ -1395,10 +1404,10 @@ pub mod machine_module {
                     }
                     "10" => {
                         // word
-                        let byte0 = state.sram_parity[relative_address];
-                        let byte1 = state.sram_parity[relative_address + Bitvector::<14>::new(1)];
-                        let byte2 = state.sram_parity[relative_address + Bitvector::<14>::new(2)];
-                        let byte3 = state.sram_parity[relative_address + Bitvector::<14>::new(3)];
+                        let byte0 = state.sram_dynamic[relative_address];
+                        let byte1 = state.sram_dynamic[relative_address + Bitvector::<14>::new(1)];
+                        let byte2 = state.sram_dynamic[relative_address + Bitvector::<14>::new(2)];
+                        let byte3 = state.sram_dynamic[relative_address + Bitvector::<14>::new(3)];
                         let word: Bitvector<32> = Self::word_from_bytes(byte0, byte1, byte2, byte3);
                         if is_signed {
                             load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Signed<32>>::into(word)));
@@ -1408,14 +1417,14 @@ pub mod machine_module {
                     }
                     "11" => {
                         // double word
-                        let byte0 = state.sram_parity[relative_address];
-                        let byte1 = state.sram_parity[relative_address + Bitvector::<14>::new(1)];
-                        let byte2 = state.sram_parity[relative_address + Bitvector::<14>::new(2)];
-                        let byte3 = state.sram_parity[relative_address + Bitvector::<14>::new(3)];
-                        let byte4 = state.sram_parity[relative_address + Bitvector::<14>::new(4)];
-                        let byte5 = state.sram_parity[relative_address + Bitvector::<14>::new(5)];
-                        let byte6 = state.sram_parity[relative_address + Bitvector::<14>::new(6)];
-                        let byte7 = state.sram_parity[relative_address + Bitvector::<14>::new(7)];
+                        let byte0 = state.sram_dynamic[relative_address];
+                        let byte1 = state.sram_dynamic[relative_address + Bitvector::<14>::new(1)];
+                        let byte2 = state.sram_dynamic[relative_address + Bitvector::<14>::new(2)];
+                        let byte3 = state.sram_dynamic[relative_address + Bitvector::<14>::new(3)];
+                        let byte4 = state.sram_dynamic[relative_address + Bitvector::<14>::new(4)];
+                        let byte5 = state.sram_dynamic[relative_address + Bitvector::<14>::new(5)];
+                        let byte6 = state.sram_dynamic[relative_address + Bitvector::<14>::new(6)];
+                        let byte7 = state.sram_dynamic[relative_address + Bitvector::<14>::new(7)];
 
                         let word0: Bitvector<32> = Self::word_from_bytes(byte0, byte1, byte2, byte3);
                         let word1: Bitvector<32> = Self::word_from_bytes(byte4, byte5, byte6, byte7);
@@ -1463,7 +1472,7 @@ pub mod machine_module {
             let last_address = Self::load_store_last(address, funct2);
             let store_unsigned = Into::<Unsigned<64>>::into(store_value);
 
-            let mut sram_parity = Clone::clone(&state.sram_parity);
+            let mut sram_dynamic = Clone::clone(&state.sram_dynamic);
 
             if address >= Unsigned::<64>::new(0x2000_4000)
                 && last_address < Unsigned::<64>::new(0x2000_7000)
@@ -1477,15 +1486,15 @@ pub mod machine_module {
                 bitmask_switch!(funct2 {
                     "00" => {
                         // byte
-                        sram_parity[relative_address] = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
+                        sram_dynamic[relative_address] = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
                     }
                     "01" => {
                         // halfword
                         let byte0 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
                         let byte1 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(8)));
 
-                        sram_parity[relative_address] = byte0;
-                        sram_parity[relative_address + Bitvector::<14>::new(1)] = byte1;
+                        sram_dynamic[relative_address] = byte0;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(1)] = byte1;
                     }
                     "10" => {
                         // word
@@ -1494,10 +1503,10 @@ pub mod machine_module {
                         let byte2 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(16)));
                         let byte3 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(24)));
 
-                        sram_parity[relative_address] = byte0;
-                        sram_parity[relative_address + Bitvector::<14>::new(1)] = byte1;
-                        sram_parity[relative_address + Bitvector::<14>::new(2)] = byte2;
-                        sram_parity[relative_address + Bitvector::<14>::new(3)] = byte3;
+                        sram_dynamic[relative_address] = byte0;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(1)] = byte1;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(2)] = byte2;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(3)] = byte3;
                     }
                     "11" => {
                         // double word
@@ -1510,14 +1519,14 @@ pub mod machine_module {
                         let byte6 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(48)));
                         let byte7 = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned >> Unsigned::<64>::new(56)));
 
-                        sram_parity[relative_address] = byte0;
-                        sram_parity[relative_address + Bitvector::<14>::new(1)] = byte1;
-                        sram_parity[relative_address + Bitvector::<14>::new(2)] = byte2;
-                        sram_parity[relative_address + Bitvector::<14>::new(3)] = byte3;
-                        sram_parity[relative_address + Bitvector::<14>::new(4)] = byte4;
-                        sram_parity[relative_address + Bitvector::<14>::new(5)] = byte5;
-                        sram_parity[relative_address + Bitvector::<14>::new(6)] = byte6;
-                        sram_parity[relative_address + Bitvector::<14>::new(7)] = byte7;
+                        sram_dynamic[relative_address] = byte0;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(1)] = byte1;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(2)] = byte2;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(3)] = byte3;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(4)] = byte4;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(5)] = byte5;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(6)] = byte6;
+                        sram_dynamic[relative_address + Bitvector::<14>::new(7)] = byte7;
                     }
                 });
             } else {
@@ -1527,7 +1536,7 @@ pub mod machine_module {
             State {
                 PC: state.PC,
                 reg: Clone::clone(&state.reg),
-                sram_parity,
+                sram_dynamic,
             }
         }
 

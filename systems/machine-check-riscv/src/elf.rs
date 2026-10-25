@@ -13,16 +13,20 @@ use crate::{
     system::machine_module::System,
 };
 
+// defines
+const SRAM_STATIC_BASE:  u32 = 0x2000_0000;
+const SRAM_DYNAMIC_BASE: u32 = 0x2000_4000;
+const PC_ENTRY:          u32 = 0x2000_1000;
+
 /// Parses an ELF file and returns the system and usable symbols.
 pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
     // zero is guaranteed-illegal instruction
     let byte_zero = Bitvector::<8>::new(0);
 
-    // program flash
-    // 0x0000_0000..0x0002_0000 (17 bits)
-        // change index here to 20-1 "20 adress bits"
-    // let mut sram_static = BitvectorArray::<18, 16>::new_filled(halfword_zero);
-    let mut program_flash = BitvectorArray::<17, 8>::new_filled(byte_zero);
+    // 0x4000 -> 4*16^3 = 2^2 * 2^12 = 2^14 -> 14 bits or short 0x3FFF -> 11 1111 1111 1111 -> 14
+    let mut sram_static = BitvectorArray::<14, 8>::new_filled(byte_zero);
+    let mut sram_dynamic = BitvectorArray::<14, 8>::new_filled(byte_zero);
+    let pc_entry= Bitvector::new(PC_ENTRY as u64);
 
     // load the program flash from program headers
     let elf_bytes = std::fs::read(path)?;
@@ -42,26 +46,25 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
         let data = program_header
             .data(LittleEndian, &*elf_bytes)
             .expect("Program header data should be present");
-
+        
+        // To Do addressspace checking if it fits
         match address {
-            // to do chnage daress
-            0x0000_0000..0x0002_0000 => {
-                // load into program flash
-
+            0x2000_0000..0x2000_4000 => {
+                let mut sram_static_addr: u32 = address - SRAM_STATIC_BASE;
                 for value in data {
-                    program_flash[Bitvector::new(address as u64)] =
+                    sram_static[Bitvector::new(sram_static_addr as u64)] =
                         Bitvector::<8>::new(*value as u64);
+                    // Index of Bitvector +1 because width is 8 bits one byte as vlaue
+                    sram_static_addr += 1;
                 }
             }
-            0x0101_0008..0x0101_0034 => {
-                // the option-setting memory cannot be read or written to
-                // within the system, do not load
-            }
-            0x2000_0000..0x2000_1000 => {
-                // ECC SRAM, not persistent, do not load
-            }
-            0x2000_4000..0x2000_7000 => {
-                // parity SRAM, not persistent, do not load
+            0x2000_4000..0x2000_8000 => {
+                let mut sram_dynamic_addr: u32 = address - SRAM_DYNAMIC_BASE;
+                for value in data {
+                    sram_dynamic[Bitvector::new(sram_dynamic_addr as u64)] =
+                        Bitvector::<8>::new(*value as u64);
+                    sram_dynamic_addr += 1;
+                }
             }
             _ => {
                 unimplemented!(
@@ -90,7 +93,7 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
         log::debug!("Usable symbols: {:#X?}", usable);
     }
     // also
-    let system = System { sram_static, sram_dynamic };
+    let system = System { sram_static, sram_dynamic, pc_entry };
 
     Ok((system, symbols))
 }

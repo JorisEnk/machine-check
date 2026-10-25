@@ -52,7 +52,6 @@ fn simulate(elf_file: &str, num_steps: usize) {
     let input = system::machine_module::Input {};
     let param = system::machine_module::Param {
         reg: machine_check::BitvectorArray::new_filled(machine_check::Bitvector::new(0)),
-        sram_parity: machine_check::BitvectorArray::new_filled(machine_check::Bitvector::new(0)),
     };
 
     let mut state = machine_check::Machine::init(&system, &input, &param);
