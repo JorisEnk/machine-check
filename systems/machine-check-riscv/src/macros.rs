@@ -65,7 +65,7 @@ pub fn pc_within_symbol(
 /// A property-macro function that returns a bitvector expression with the value
 /// of a given symbol, with a correct number of bits (8 * bytes).
 ///
-/// Only symbols within the onboard SRAM (parity) at 0x2000_4000..0x2000_7000 are currently supported.
+/// Only symbols within the onboard SRAM_Dynamic at 0x2000_4000..0x2000_8000 are currently supported.
 pub fn typed_symbol(
     symbols: &Symbols,
     token_stream: TokenStream,
@@ -82,12 +82,12 @@ pub fn typed_symbol(
     let byte_size = *byte_size as u64;
     let after_end_address = address + byte_size;
 
-    // only the onboard SRAM (parity) at 0x2000_4000..0x2000_7000 is currently supported
+    // only the onboard SRAM dynamic at 0x2000_4000..0x2000_8000 is currently supported
 
-    const SRAM_PARITY_START: u64 = 0x2000_4000;
-    const SRAM_PARITY_AFTER_END: u64 = 0x2000_7000;
+    const SRAM_DYNAMIC_START: u64 = 0x2000_4000;
+    const SRAM_DYNAMIC_AFTER_END: u64 = 0x2000_8000;
 
-    if address < SRAM_PARITY_START || after_end_address > SRAM_PARITY_AFTER_END {
+    if address < SRAM_DYNAMIC_START || after_end_address > SRAM_DYNAMIC_AFTER_END {
         return Err(anyhow::anyhow!(
             "Symbol '{}' address ({}..{}) is not within onboard SRAM (parity)",
             symbol_name,
@@ -96,7 +96,7 @@ pub fn typed_symbol(
         ));
     };
 
-    let relative_address = address - SRAM_PARITY_START;
+    let relative_address = address - SRAM_DYNAMIC_START;
 
     // construct the result expression by concatenating bytes
     let mut result_expr = None;
@@ -110,7 +110,7 @@ pub fn typed_symbol(
         let quoted = quote::quote_spanned! {span=>
             (::machine_check::Ext::<#bit_size>::ext(
                 ::std::convert::Into::<::machine_check::Unsigned<8>>::into(
-                    sram_parity[::machine_check::Bitvector::<14>::new(#index)])
+                    sram_dynamic[::machine_check::Bitvector::<14>::new(#index)])
             ) << ::machine_check::Unsigned::<#bit_size>::new(#bit_index))
         };
 

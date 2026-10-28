@@ -14,9 +14,9 @@ use crate::{
 };
 
 // defines
-const SRAM_STATIC_BASE:  u32 = 0x2000_0000;
+const SRAM_STATIC_BASE: u32 = 0x2000_0000;
 const SRAM_DYNAMIC_BASE: u32 = 0x2000_4000;
-const PC_ENTRY:          u32 = 0x2000_1000;
+const PC_ENTRY: u32 = 0x2000_1000;
 
 /// Parses an ELF file and returns the system and usable symbols.
 pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
@@ -26,7 +26,7 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
     // 0x4000 -> 4*16^3 = 2^2 * 2^12 = 2^14 -> 14 bits or short 0x3FFF -> 11 1111 1111 1111 -> 14
     let mut sram_static = BitvectorArray::<14, 8>::new_filled(byte_zero);
     let mut sram_dynamic = BitvectorArray::<14, 8>::new_filled(byte_zero);
-    let pc_entry= Bitvector::new(PC_ENTRY as u64);
+    let pc_entry = Bitvector::new(PC_ENTRY as u64);
 
     // load the program flash from program headers
     let elf_bytes = std::fs::read(path)?;
@@ -46,7 +46,7 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
         let data = program_header
             .data(LittleEndian, &*elf_bytes)
             .expect("Program header data should be present");
-        
+
         // To Do addressspace checking if it fits
         match address {
             0x2000_0000..0x2000_4000 => {
@@ -93,7 +93,11 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
         log::debug!("Usable symbols: {:#X?}", usable);
     }
     // also
-    let system = System { sram_static, sram_dynamic, pc_entry };
+    let system = System {
+        sram_static,
+        sram_dynamic,
+        pc_entry,
+    };
 
     Ok((system, symbols))
 }

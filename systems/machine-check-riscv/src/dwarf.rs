@@ -225,6 +225,10 @@ fn evaluate_attribute_address<'a, R: Reader>(
                 let index = dwarf.address(unit_ref, index)?;
                 evaluation.resume_with_indexed_address(index)?;
             }
+            // had to add for DW_AT_location
+            EvaluationResult::RequiresRelocatedAddress(address) => {
+                evaluation.resume_with_relocated_address(address)?;
+            }
             _ => {
                 // we could not figure out the address
                 return Ok(AddressEval::EvalFailed);

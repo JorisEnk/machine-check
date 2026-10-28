@@ -32,15 +32,12 @@ pub mod machine_module {
         /// Register 0 is always zero.
         reg: BitvectorArray<5, 64>,
 
-
         // should i add here the SRAM with the machine code parsed from the .elf?
-
         /// Onboard SRAM (Parity), 0x2000_4000..0x2000_7000
         ///
         /// this means there are 12288 bytes
         /// use a 14-bit array (16384) with further bounds checking
         sram_dynamic: BitvectorArray<14, 8>,
-
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -49,8 +46,8 @@ pub mod machine_module {
         ///
         /// here stored as little-endian halfwords
         pub sram_static: BitvectorArray<14, 8>,
-        pub sram_dynamic:BitvectorArray<14, 8>,
-        pub pc_entry:Bitvector<64>,
+        pub sram_dynamic: BitvectorArray<14, 8>,
+        pub pc_entry: Bitvector<64>,
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -146,7 +143,7 @@ pub mod machine_module {
             let first_half_rest = Ext::<4>::ext(first_half_noncomp >> Unsigned::<14>::new(10));
 
             let mut reg = Clone::clone(&state.reg);
-            let mut sram_dynamic= Clone::clone(&state.sram_dynamic);
+            let mut sram_dynamic = Clone::clone(&state.sram_dynamic);
 
             // RV64I implemented here
 
@@ -1309,14 +1306,14 @@ pub mod machine_module {
             let index0 = Into::<Bitvector<14>>::into(Ext::<14>::ext(unsigned_pc0));
             let index1 = Into::<Bitvector<14>>::into(Ext::<14>::ext(unsigned_pc1));
 
-
             // not sure if here sram_static or dynamic would say static
             let pc_value0 = Ext::<16>::ext(Into::<Unsigned<8>>::into(self.sram_static[index0]));
 
             // have to shift here for higher byte of PC
-            let pc_value1 = Ext::<16>::ext(Into::<Unsigned<8>>::into(self.sram_static[index1])) << Unsigned::<16>::new(8);
+            let pc_value1 = Ext::<16>::ext(Into::<Unsigned<8>>::into(self.sram_static[index1]))
+                << Unsigned::<16>::new(8);
 
-            pc_value0 | pc_value1 
+            pc_value0 | pc_value1
         }
 
         fn extract_rs1(first_half_rest: Unsigned<4>, second_half: Unsigned<16>) -> Bitvector<5> {
@@ -1373,9 +1370,9 @@ pub mod machine_module {
             let mut load_value = Bitvector::<64>::new(0);
 
             if address >= Unsigned::<64>::new(0x2000_4000)
-                && last_address < Unsigned::<64>::new(0x2000_7000)
+                && last_address < Unsigned::<64>::new(0x2000_8000)
             {
-                // SRAM parity
+                // SRAM_dynamic
                 let relative_address = Into::<Bitvector<14>>::into(Ext::<14>::ext(
                     address - Unsigned::<64>::new(0x2000_4000),
                 ));
@@ -1475,7 +1472,7 @@ pub mod machine_module {
             let mut sram_dynamic = Clone::clone(&state.sram_dynamic);
 
             if address >= Unsigned::<64>::new(0x2000_4000)
-                && last_address < Unsigned::<64>::new(0x2000_7000)
+                && last_address < Unsigned::<64>::new(0x2000_8000)
             {
                 // SRAM parity
                 let relative_address = Into::<Bitvector<14>>::into(Ext::<14>::ext(
