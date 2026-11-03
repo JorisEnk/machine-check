@@ -32,22 +32,26 @@ pub mod machine_module {
         /// Register 0 is always zero.
         reg: BitvectorArray<5, 64>,
 
-        // should i add here the SRAM with the machine code parsed from the .elf?
-        /// Onboard SRAM (Parity), 0x2000_4000..0x2000_7000
-        ///
-        /// this means there are 12288 bytes
-        /// use a 14-bit array (16384) with further bounds checking
+        /// Onboard SRAM_dynamic, 0x2000_4000..0x2000_8000
         sram_dynamic: BitvectorArray<14, 8>,
+
+        /// registers for the QMI 0x400d_0000..0x400d_000c
+        pub qmi_direct_csr: Bitvector<32>,
+        pub qmi_direct_tx: Bitvector<32>,
+        pub qmi_direct_rx: Bitvector<32>,
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
     pub struct System {
-        /// Program flash, 0x0000_0000..0x0002_0000
-        ///
+        /// no programm flash but programm code is in sram_static
+        /// sram_dynamic for globals etc
         /// here stored as little-endian halfwords
         pub sram_static: BitvectorArray<14, 8>,
         pub sram_dynamic: BitvectorArray<14, 8>,
         pub pc_entry: Bitvector<64>,
+        pub qmi_direct_csr: Bitvector<32>,
+        pub qmi_direct_tx: Bitvector<32>,
+        pub qmi_direct_rx: Bitvector<32>,
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -68,12 +72,18 @@ pub mod machine_module {
             // SRAM data is undefined after power-on
             let sram_dynamic = Clone::clone(&self.sram_dynamic);
             let PC = Clone::clone(&self.pc_entry);
+            let qmi_direct_csr = Clone::clone(&self.qmi_direct_csr);
+            let qmi_direct_tx = Clone::clone(&self.qmi_direct_tx);
+            let qmi_direct_rx = Clone::clone(&self.qmi_direct_rx);
 
             State {
                 // Program Counter starts at zero
                 PC,
                 reg,
                 sram_dynamic,
+                qmi_direct_csr,
+                qmi_direct_tx,
+                qmi_direct_rx,
             }
         }
 
@@ -92,6 +102,9 @@ pub mod machine_module {
                 PC,
                 reg: Clone::clone(&state.reg),
                 sram_dynamic: Clone::clone(&state.sram_dynamic),
+                qmi_direct_csr: Clone::clone(&state.qmi_direct_csr),
+                qmi_direct_tx: Clone::clone(&state.qmi_direct_tx),
+                qmi_direct_rx: Clone::clone(&state.qmi_direct_rx),
             };
 
             // perform instruction according to quadrant
@@ -144,6 +157,9 @@ pub mod machine_module {
 
             let mut reg = Clone::clone(&state.reg);
             let mut sram_dynamic = Clone::clone(&state.sram_dynamic);
+            let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
+            let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
+            let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
 
             // RV64I implemented here
 
@@ -518,6 +534,9 @@ pub mod machine_module {
                     let store_result: State = Self::store(state, address, store_value, funct3);
                     reg = Clone::clone(&store_result.reg);
                     sram_dynamic = Clone::clone(&store_result.sram_dynamic);
+                    qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
+                    qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
+                    qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
                 }
                 "11000" => {
                     // B-type branch
@@ -733,6 +752,9 @@ pub mod machine_module {
                 PC,
                 reg,
                 sram_dynamic,
+                qmi_direct_csr,
+                qmi_direct_tx,
+                qmi_direct_rx,
             }
         }
 
@@ -745,6 +767,9 @@ pub mod machine_module {
         ) -> State {
             let mut reg = Clone::clone(&state.reg);
             let mut sram_dynamic = Clone::clone(&state.sram_dynamic);
+            let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
+            let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
+            let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
 
             // all C extension instructions in this quadrant (0) implemented
 
@@ -827,6 +852,9 @@ pub mod machine_module {
                         let store_result: State = Self::store(state, address, store_value, funct3);
                         reg = Clone::clone(&store_result.reg);
                         sram_dynamic = Clone::clone(&store_result.sram_dynamic);
+                        qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
+                        qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
+                        qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
                     }
                 }
                 "q11_uuu_sss_uu_ddd" => {
@@ -867,6 +895,9 @@ pub mod machine_module {
                         let store_result: State = Self::store(state, address, store_value, funct3);
                         reg = Clone::clone(&store_result.reg);
                         sram_dynamic = Clone::clone(&store_result.sram_dynamic);
+                        qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
+                        qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
+                        qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
                     }
                 }
 
@@ -877,6 +908,9 @@ pub mod machine_module {
                 PC: state.PC,
                 reg,
                 sram_dynamic,
+                qmi_direct_csr,
+                qmi_direct_tx,
+                qmi_direct_rx,
             }
         }
 
@@ -891,6 +925,9 @@ pub mod machine_module {
 
             let mut PC = state.PC;
             let sram_dynamic = Clone::clone(&state.sram_dynamic);
+            let qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
+            let qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
+            let qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
 
             // all C extension instructions in this quadrant (1) implemented
 
@@ -1097,6 +1134,9 @@ pub mod machine_module {
                 PC,
                 reg,
                 sram_dynamic,
+                qmi_direct_csr,
+                qmi_direct_tx,
+                qmi_direct_rx,
             }
         }
 
@@ -1110,6 +1150,9 @@ pub mod machine_module {
             let mut PC = state.PC;
             let mut reg = Clone::clone(&state.reg);
             let mut sram_dynamic = Clone::clone(&state.sram_dynamic);
+            let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
+            let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
+            let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
 
             // all C extension instructions in this quadrant (2) implemented
 
@@ -1252,6 +1295,9 @@ pub mod machine_module {
                     let store_result: State = Self::store(state, address, store_value, funct3);
                     reg = Clone::clone(&store_result.reg);
                     sram_dynamic = Clone::clone(&store_result.sram_dynamic);
+                    qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
+                    qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
+                    qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
 
                 }
                 "111_u_uuuuu_sssss" => {
@@ -1276,6 +1322,9 @@ pub mod machine_module {
                     let store_result: State = Self::store(state, address, store_value, funct3);
                     reg = Clone::clone(&store_result.reg);
                     sram_dynamic = Clone::clone(&store_result.sram_dynamic);
+                    qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
+                    qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
+                    qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
 
                 }
                 _ => unimplemented!("Given instruction in compressed quadrant 2")
@@ -1285,6 +1334,9 @@ pub mod machine_module {
                 PC,
                 reg,
                 sram_dynamic,
+                qmi_direct_csr,
+                qmi_direct_tx,
+                qmi_direct_rx,
             }
         }
 
@@ -1470,11 +1522,14 @@ pub mod machine_module {
             let store_unsigned = Into::<Unsigned<64>>::into(store_value);
 
             let mut sram_dynamic = Clone::clone(&state.sram_dynamic);
+            let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
+            let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
+            let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
 
             if address >= Unsigned::<64>::new(0x2000_4000)
                 && last_address < Unsigned::<64>::new(0x2000_8000)
             {
-                // SRAM parity
+                // SRAM_dynamic
                 let relative_address = Into::<Bitvector<14>>::into(Ext::<14>::ext(
                     address - Unsigned::<64>::new(0x2000_4000),
                 ));
@@ -1526,6 +1581,30 @@ pub mod machine_module {
                         sram_dynamic[relative_address + Bitvector::<14>::new(7)] = byte7;
                     }
                 });
+            // QMI_address
+            } else if address >= Unsigned::<64>::new(0x400d_0000)
+                && last_address < Unsigned::<64>::new(0x400d_d00c)
+            {
+                let relative_address = Into::<Bitvector<8>>::into(Ext::<8>::ext(
+                    address - Unsigned::<64>::new(0x400d_0000),
+                ));
+                bitmask_switch!(relative_address {
+                    // CSR 0x0
+                    "00000000" => {
+                        qmi_direct_csr = Into::<Bitvector<32>>::into(Ext::<32>::ext(store_unsigned));
+                    }
+                    // TX 0x4
+                    "00000100" => {
+                        qmi_direct_tx = Into::<Bitvector<32>>::into(Ext::<32>::ext(store_unsigned));
+                    }
+                    // RX 0x8
+                    "00001000" => {
+                        qmi_direct_rx = Into::<Bitvector<32>>::into(Ext::<32>::ext(store_unsigned));
+                    }
+                    _ => {
+                        unimplemented!("Store at given address");
+                    }
+                });
             } else {
                 unimplemented!("Store at given address");
             }
@@ -1534,6 +1613,9 @@ pub mod machine_module {
                 PC: state.PC,
                 reg: Clone::clone(&state.reg),
                 sram_dynamic,
+                qmi_direct_csr,
+                qmi_direct_tx,
+                qmi_direct_rx,
             }
         }
 

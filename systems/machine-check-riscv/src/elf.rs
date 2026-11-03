@@ -28,6 +28,11 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
     let mut sram_dynamic = BitvectorArray::<14, 8>::new_filled(byte_zero);
     let pc_entry = Bitvector::new(PC_ENTRY as u64);
 
+    // QMI registers
+    let qmi_direct_csr = Bitvector::<32>::new(0);
+    let qmi_direct_tx = Bitvector::<32>::new(0);
+    let qmi_direct_rx = Bitvector::<32>::new(0);
+
     // load the program flash from program headers
     let elf_bytes = std::fs::read(path)?;
     let elf_file = ElfFile32::<LittleEndian>::parse(&*elf_bytes)?;
@@ -97,6 +102,9 @@ pub fn parse_elf(path: &str) -> anyhow::Result<(System, dwarf::Symbols)> {
         sram_static,
         sram_dynamic,
         pc_entry,
+        qmi_direct_csr,
+        qmi_direct_tx,
+        qmi_direct_rx,
     };
 
     Ok((system, symbols))
