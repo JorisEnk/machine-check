@@ -1485,6 +1485,33 @@ pub mod machine_module {
                         }
                     }
                 });
+            }
+            // load of QMI registers 0x400d_0000.. 0x400d_000c
+            else if address >= Unsigned::<64>::new(0x400d_0000)
+                && last_address < Unsigned::<64>::new(0x400d_000c)
+            {
+                let relative_address = Into::<Bitvector<8>>::into(Ext::<8>::ext(
+                    address - Unsigned::<64>::new(0x400d_0000),
+                ));
+                bitmask_switch!(relative_address {
+                    // CSR 0x0
+                    "00000000" => {
+                        load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Unsigned<32>>::into(state.qmi_direct_csr)));
+                    }
+                    // probably dont need load of tx so shouldnt be an option?
+                    // TX 0x4
+                    "00000100" => {
+                        load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Unsigned<32>>::into(state.qmi_direct_tx)));
+                    }
+                    // probably no store here only read
+                    // RX 0x8
+                    "00001000" => {
+                        load_value = Into::<Bitvector<64>>::into(Ext::<64>::ext(Into::<Unsigned<32>>::into(state.qmi_direct_rx)));
+                    }
+                    _ => {
+                        unimplemented!("Load at given address");
+                    }
+                });
             } else {
                 unimplemented!("Load at given address");
             }
@@ -1583,7 +1610,7 @@ pub mod machine_module {
                 });
             // QMI_address
             } else if address >= Unsigned::<64>::new(0x400d_0000)
-                && last_address < Unsigned::<64>::new(0x400d_d00c)
+                && last_address < Unsigned::<64>::new(0x400d_000c)
             {
                 let relative_address = Into::<Bitvector<8>>::into(Ext::<8>::ext(
                     address - Unsigned::<64>::new(0x400d_0000),
@@ -1597,6 +1624,7 @@ pub mod machine_module {
                     "00000100" => {
                         qmi_direct_tx = Into::<Bitvector<32>>::into(Ext::<32>::ext(store_unsigned));
                     }
+                    // probably no store here only read
                     // RX 0x8
                     "00001000" => {
                         qmi_direct_rx = Into::<Bitvector<32>>::into(Ext::<32>::ext(store_unsigned));
