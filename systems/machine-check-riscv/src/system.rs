@@ -72,6 +72,8 @@ pub mod machine_module {
         pub addr: Bitvector<24>,
         // for returning flash data, couldn't do a tuple return
         pub result: Bitvector<8>,
+        // flash memory 4 bytes for testing has to increased later
+        pub flash_memory: BitvectorArray<3,8>,
     }
 
     impl ::machine_check::Machine for System {
@@ -84,6 +86,8 @@ pub mod machine_module {
             let mut reg = Clone::clone(&param.reg);
             reg[Bitvector::<5>::new(0)] = Bitvector::<64>::new(0);
 
+            let byte_zero = Bitvector::<8>::new(0);
+
             // SRAM data is undefined after power-on
             let sram_dynamic = Clone::clone(&self.sram_dynamic);
             let PC = Clone::clone(&self.pc_entry);
@@ -95,6 +99,7 @@ pub mod machine_module {
                 count: Bitvector::<16>::new(0),
                 addr: Bitvector::<24>::new(0),
                 result: Bitvector::<8>::new(0),
+                flash_memory: BitvectorArray::<3,8>::new_filled(byte_zero),
             };
 
             State {
@@ -1562,13 +1567,24 @@ pub mod machine_module {
         fn flash_compute(flash: &Flash, data: Bitvector<8>) -> Flash {
             let mut count = Clone::clone(&flash.count);
             let mut mode = Clone::clone(&flash.mode);
+            let mut addr = Clone::clone(&flash.addr);
+            let mut flash_memory = Clone::clone(&flash.flash_memory);
             let mut result: Bitvector<8> = Clone::clone(&flash.result);
 
             // opcode
             if count == Bitvector::<16>::new(0) {
                 bitmask_switch!(data {
+                    // Read JEDEC_ID 0x9F
                     "10011111" => {
                         mode = Bitvector::<2>::new(1);
+                    }
+                    // Read SPI Single
+                    "00000011" =>{
+                        mode = Bitvector::<2>::new(3);
+                    }
+                    // Page prgram 0x02
+                    "00000010" =>{
+                        mode = Bitvector::<2>::new(2);
                     }
                     _ => {
                         unimplemented!("Flash-mode not supported!");
@@ -1577,6 +1593,7 @@ pub mod machine_module {
                 result = Bitvector::<8>::new(0);
                 count = count + Bitvector::<16>::new(1);
             } else {
+                result = Bitvector::<8>::new(0);
                 // distingish between modes and then do mode specific byte handling
                 bitmask_switch!(mode {
                     // JEDEC_ID
@@ -1591,18 +1608,54 @@ pub mod machine_module {
                             unimplemented!("wrong byte cunt on JEDEC_ID");
                         }
                     }
-                    //read
-                    //write
+                    //read 0x03 3x Addr byte then data byte is shifted out MSB fitst and addr is incremented
+                    "11" => {
+                        if count == Bitvector::<16>::new(1) {
+                            addr = Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(16);
+                        } else if count == Bitvector::<16>::new(2) {
+                            addr = addr  | (Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(8));
+                        } else if count == Bitvector::<16>::new(3) {
+                           addr = addr  | Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data)));
+                        } else if Into::<Unsigned<16>>::into(count) > Unsigned::<16>::new(3){
+                            // cast addr into 2bit vecotr
+                            let small_addr: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<24>>::into(addr)),);
+                            let offset: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<16>>::into(count - Bitvector::<16>::new(4)),));
+                            result = flash_memory[small_addr + offset];
+                        }else {
+                            unimplemented!("wrong byte cunt on READ");
+                        }
+                    }
+                    //write 0x02 
+                    "10" => {
+                        if count == Bitvector::<16>::new(1) {
+                            addr = Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(16);
+                        } else if count == Bitvector::<16>::new(2) {
+                            addr = addr  | (Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(8));
+                        } else if count == Bitvector::<16>::new(3) {
+                           addr = addr  | Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data)));
+                        } else if Into::<Unsigned<16>>::into(count) > Unsigned::<16>::new(3){
+                            // cast addr into 2bit vecotr
+                            let small_addr: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<24>>::into(addr)),);
+                            let offset: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<16>>::into(count - Bitvector::<16>::new(4)),));
+                            flash_memory[small_addr + offset] = data;
+                        }else {
+                            unimplemented!("wrong byte cunt on WRITE");
+                        }
+                    }
                     _ => unimplemented!("unknown mode"),
                 });
                 count = count + Bitvector::<16>::new(1);
+                if count == Bitvector::<16>::new(7){
+                    count = Bitvector::<16>::new(0);
+                }
             }
 
             Flash {
                 mode,
                 count,
-                addr: Clone::clone(&flash.addr),
+                addr,
                 result,
+                flash_memory,
             }
         }
 
