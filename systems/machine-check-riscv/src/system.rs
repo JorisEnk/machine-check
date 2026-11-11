@@ -39,6 +39,9 @@ pub mod machine_module {
         pub qmi_direct_csr: Bitvector<32>,
         pub qmi_direct_tx: Bitvector<32>,
         pub qmi_direct_rx: Bitvector<32>,
+
+        /// struct to save flash states
+        pub flash: Flash,
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -59,6 +62,18 @@ pub mod machine_module {
         pub reg: BitvectorArray<5, 64>,
     }
 
+    #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+    pub struct Flash {
+        // what is the flash doing
+        pub mode: Bitvector<2>,
+        // count how many bytes are recieved
+        pub count: Bitvector<16>,
+        // addr for read/write is 24bits long
+        pub addr: Bitvector<24>,
+        // for returning flash data, couldn't do a tuple return
+        pub result: Bitvector<8>,
+    }
+
     impl ::machine_check::Machine for System {
         type Input = Input;
         type State = State;
@@ -75,6 +90,12 @@ pub mod machine_module {
             let qmi_direct_csr = Clone::clone(&self.qmi_direct_csr);
             let qmi_direct_tx = Clone::clone(&self.qmi_direct_tx);
             let qmi_direct_rx = Clone::clone(&self.qmi_direct_rx);
+            let flash = Flash {
+                mode: Bitvector::<2>::new(0),
+                count: Bitvector::<16>::new(0),
+                addr: Bitvector::<24>::new(0),
+                result: Bitvector::<8>::new(0),
+            };
 
             State {
                 // Program Counter starts at zero
@@ -84,6 +105,7 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
+                flash,
             }
         }
 
@@ -105,6 +127,7 @@ pub mod machine_module {
                 qmi_direct_csr: Clone::clone(&state.qmi_direct_csr),
                 qmi_direct_tx: Clone::clone(&state.qmi_direct_tx),
                 qmi_direct_rx: Clone::clone(&state.qmi_direct_rx),
+                flash: Clone::clone(&state.flash),
             };
 
             // perform instruction according to quadrant
@@ -160,6 +183,7 @@ pub mod machine_module {
             let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
             let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
             let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
+            let mut flash = Clone::clone(&state.flash);
 
             // RV64I implemented here
 
@@ -537,6 +561,7 @@ pub mod machine_module {
                     qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                     qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                     qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
+                    flash = Clone::clone(&store_result.flash);
                 }
                 "11000" => {
                     // B-type branch
@@ -755,6 +780,7 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
+                flash,
             }
         }
 
@@ -770,6 +796,7 @@ pub mod machine_module {
             let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
             let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
             let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
+            let mut flash = Clone::clone(&state.flash);
 
             // all C extension instructions in this quadrant (0) implemented
 
@@ -855,6 +882,7 @@ pub mod machine_module {
                         qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                         qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                         qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
+                        flash = Clone::clone(&store_result.flash);
                     }
                 }
                 "q11_uuu_sss_uu_ddd" => {
@@ -898,6 +926,7 @@ pub mod machine_module {
                         qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                         qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                         qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
+                        flash = Clone::clone(&store_result.flash);
                     }
                 }
 
@@ -911,6 +940,7 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
+                flash,
             }
         }
 
@@ -1137,6 +1167,7 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
+                flash: Clone::clone(&state.flash),
             }
         }
 
@@ -1153,6 +1184,7 @@ pub mod machine_module {
             let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
             let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
             let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
+            let mut flash = Clone::clone(&state.flash);
 
             // all C extension instructions in this quadrant (2) implemented
 
@@ -1298,6 +1330,7 @@ pub mod machine_module {
                     qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                     qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                     qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
+                    flash = Clone::clone(&store_result.flash);
 
                 }
                 "111_u_uuuuu_sssss" => {
@@ -1325,7 +1358,7 @@ pub mod machine_module {
                     qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                     qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                     qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
-
+                    flash = Clone::clone(&store_result.flash);
                 }
                 _ => unimplemented!("Given instruction in compressed quadrant 2")
             });
@@ -1337,6 +1370,7 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
+                flash,
             }
         }
 
@@ -1525,6 +1559,53 @@ pub mod machine_module {
             reg
         }
 
+        fn flash_compute(flash: &Flash, data: Bitvector<8>) -> Flash {
+            let mut count = Clone::clone(&flash.count);
+            let mut mode = Clone::clone(&flash.mode);
+            let mut result: Bitvector<8> = Clone::clone(&flash.result);
+
+            // opcode
+            if count == Bitvector::<16>::new(0) {
+                bitmask_switch!(data {
+                    "10011111" => {
+                        mode = Bitvector::<2>::new(1);
+                    }
+                    _ => {
+                        unimplemented!("Flash-mode not supported!");
+                    }
+                });
+                result = Bitvector::<8>::new(0);
+                count = count + Bitvector::<16>::new(1);
+            } else {
+                // distingish between modes and then do mode specific byte handling
+                bitmask_switch!(mode {
+                    // JEDEC_ID
+                    "01" => {
+                        if count == Bitvector::<16>::new(1) {
+                            result = Bitvector::<8>::new(0xEF);
+                        } else if count == Bitvector::<16>::new(2) {
+                            result = Bitvector::<8>::new(0x40);
+                        } else if count == Bitvector::<16>::new(3) {
+                            result = Bitvector::<8>::new(0x16);
+                        } else {
+                            unimplemented!("wrong byte cunt on JEDEC_ID");
+                        }
+                    }
+                    //read
+                    //write
+                    _ => unimplemented!("unknown mode"),
+                });
+                count = count + Bitvector::<16>::new(1);
+            }
+
+            Flash {
+                mode,
+                count,
+                addr: Clone::clone(&flash.addr),
+                result,
+            }
+        }
+
         fn store(
             state: &State,
             address: Unsigned<64>,
@@ -1552,6 +1633,8 @@ pub mod machine_module {
             let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
             let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
             let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
+
+            let mut flash = Clone::clone(&state.flash);
 
             if address >= Unsigned::<64>::new(0x2000_4000)
                 && last_address < Unsigned::<64>::new(0x2000_8000)
@@ -1619,10 +1702,18 @@ pub mod machine_module {
                     // CSR 0x0
                     "00000000" => {
                         qmi_direct_csr = Into::<Bitvector<32>>::into(Ext::<32>::ext(store_unsigned));
+                        // here is CS change can happen, so later can reset the Flash state.
                     }
                     // TX 0x4
                     "00000100" => {
                         qmi_direct_tx = Into::<Bitvector<32>>::into(Ext::<32>::ext(store_unsigned));
+
+                        // every tx is handled by flash_compute. flash_computes always retunrs something must be handle by qmi depending on NOPUSH
+                        let data: Bitvector<8> = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
+                        flash = Self::flash_compute(&flash, data);
+
+                        // nopush later
+                        qmi_direct_rx = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Unsigned<8>>::into(flash.result),));
                     }
                     // probably no store here only read
                     // RX 0x8
@@ -1644,6 +1735,7 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
+                flash,
             }
         }
 
