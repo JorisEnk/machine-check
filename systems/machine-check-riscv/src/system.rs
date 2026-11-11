@@ -36,12 +36,20 @@ pub mod machine_module {
         sram_dynamic: BitvectorArray<14, 8>,
 
         /// registers for the QMI 0x400d_0000..0x400d_000c
-        pub qmi_direct_csr: Bitvector<32>,
-        pub qmi_direct_tx: Bitvector<32>,
-        pub qmi_direct_rx: Bitvector<32>,
+        qmi_direct_csr: Bitvector<32>,
+        qmi_direct_tx: Bitvector<32>,
+        qmi_direct_rx: Bitvector<32>,
 
-        /// struct to save flash states
-        pub flash: Flash,
+        // what is the flash doing
+        flash_mode: Bitvector<2>,
+        // count how many bytes are recieved
+        flash_count: Bitvector<16>,
+        // addr for read/write is 24bits long
+        flash_addr: Bitvector<24>,
+        // for returning flash data, couldn't do a tuple return
+        flash_result: Bitvector<8>,
+        // flash memory 4 bytes for testing has to increased later
+        flash_memory: BitvectorArray<3, 8>,
     }
 
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -60,20 +68,6 @@ pub mod machine_module {
     #[derive(Clone, PartialEq, Eq, Hash, Debug)]
     pub struct Param {
         pub reg: BitvectorArray<5, 64>,
-    }
-
-    #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-    pub struct Flash {
-        // what is the flash doing
-        pub mode: Bitvector<2>,
-        // count how many bytes are recieved
-        pub count: Bitvector<16>,
-        // addr for read/write is 24bits long
-        pub addr: Bitvector<24>,
-        // for returning flash data, couldn't do a tuple return
-        pub result: Bitvector<8>,
-        // flash memory 4 bytes for testing has to increased later
-        pub flash_memory: BitvectorArray<3,8>,
     }
 
     impl ::machine_check::Machine for System {
@@ -95,13 +89,11 @@ pub mod machine_module {
             let qmi_direct_csr = Bitvector::<32>::new(0x06) << Bitvector::<32>::new(22);
             let qmi_direct_tx = Clone::clone(&self.qmi_direct_tx);
             let qmi_direct_rx = Clone::clone(&self.qmi_direct_rx);
-            let flash = Flash {
-                mode: Bitvector::<2>::new(0),
-                count: Bitvector::<16>::new(0),
-                addr: Bitvector::<24>::new(0),
-                result: Bitvector::<8>::new(0),
-                flash_memory: BitvectorArray::<3,8>::new_filled(byte_zero),
-            };
+            let flash_mode = Bitvector::<2>::new(0);
+            let flash_count = Bitvector::<16>::new(0);
+            let flash_addr = Bitvector::<24>::new(0);
+            let flash_result = Bitvector::<8>::new(0);
+            let flash_memory = BitvectorArray::<3, 8>::new_filled(byte_zero);
 
             State {
                 // Program Counter starts at zero
@@ -111,7 +103,11 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
-                flash,
+                flash_mode,
+                flash_count,
+                flash_addr,
+                flash_result,
+                flash_memory,
             }
         }
 
@@ -133,7 +129,11 @@ pub mod machine_module {
                 qmi_direct_csr: Clone::clone(&state.qmi_direct_csr),
                 qmi_direct_tx: Clone::clone(&state.qmi_direct_tx),
                 qmi_direct_rx: Clone::clone(&state.qmi_direct_rx),
-                flash: Clone::clone(&state.flash),
+                flash_mode: Clone::clone(&state.flash_mode),
+                flash_count: Clone::clone(&state.flash_count),
+                flash_addr: Clone::clone(&state.flash_addr),
+                flash_result: Clone::clone(&state.flash_result),
+                flash_memory: Clone::clone(&state.flash_memory),
             };
 
             // perform instruction according to quadrant
@@ -189,7 +189,11 @@ pub mod machine_module {
             let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
             let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
             let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
-            let mut flash = Clone::clone(&state.flash);
+            let mut flash_mode = Clone::clone(&state.flash_mode);
+            let mut flash_count = Clone::clone(&state.flash_count);
+            let mut flash_addr = Clone::clone(&state.flash_addr);
+            let mut flash_result = Clone::clone(&state.flash_result);
+            let mut flash_memory = Clone::clone(&state.flash_memory);
 
             // RV64I implemented here
 
@@ -567,7 +571,11 @@ pub mod machine_module {
                     qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                     qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                     qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
-                    flash = Clone::clone(&store_result.flash);
+                    flash_mode = Clone::clone(&store_result.flash_mode);
+                    flash_count = Clone::clone(&store_result.flash_count);
+                    flash_addr = Clone::clone(&store_result.flash_addr);
+                    flash_result = Clone::clone(&store_result.flash_result);
+                    flash_memory = Clone::clone(&store_result.flash_memory);
                 }
                 "11000" => {
                     // B-type branch
@@ -786,7 +794,11 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
-                flash,
+                flash_mode,
+                flash_count,
+                flash_addr,
+                flash_result,
+                flash_memory,
             }
         }
 
@@ -802,8 +814,11 @@ pub mod machine_module {
             let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
             let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
             let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
-            let mut flash = Clone::clone(&state.flash);
-
+            let mut flash_mode = Clone::clone(&state.flash_mode);
+            let mut flash_count = Clone::clone(&state.flash_count);
+            let mut flash_addr = Clone::clone(&state.flash_addr);
+            let mut flash_result = Clone::clone(&state.flash_result);
+            let mut flash_memory = Clone::clone(&state.flash_memory);
             // all C extension instructions in this quadrant (0) implemented
 
             bitmask_switch!(opcode_instr {
@@ -888,7 +903,11 @@ pub mod machine_module {
                         qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                         qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                         qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
-                        flash = Clone::clone(&store_result.flash);
+                        flash_mode = Clone::clone(&store_result.flash_mode);
+                        flash_count = Clone::clone(&store_result.flash_count);
+                        flash_addr = Clone::clone(&store_result.flash_addr);
+                        flash_result = Clone::clone(&store_result.flash_result);
+                        flash_memory = Clone::clone(&store_result.flash_memory);
                     }
                 }
                 "q11_uuu_sss_uu_ddd" => {
@@ -932,7 +951,7 @@ pub mod machine_module {
                         qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                         qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                         qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
-                        flash = Clone::clone(&store_result.flash);
+                        // 64 bit operation not on flash
                     }
                 }
 
@@ -946,7 +965,11 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
-                flash,
+                flash_mode,
+                flash_count,
+                flash_addr,
+                flash_result,
+                flash_memory,
             }
         }
 
@@ -1173,7 +1196,11 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
-                flash: Clone::clone(&state.flash),
+                flash_mode: Clone::clone(&state.flash_mode),
+                flash_count: Clone::clone(&state.flash_count),
+                flash_addr: Clone::clone(&state.flash_addr),
+                flash_result: Clone::clone(&state.flash_result),
+                flash_memory: Clone::clone(&state.flash_memory),
             }
         }
 
@@ -1190,8 +1217,11 @@ pub mod machine_module {
             let mut qmi_direct_csr = Clone::clone(&state.qmi_direct_csr);
             let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
             let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
-            let mut flash = Clone::clone(&state.flash);
-
+            let mut flash_mode = Clone::clone(&state.flash_mode);
+            let mut flash_count = Clone::clone(&state.flash_count);
+            let mut flash_addr = Clone::clone(&state.flash_addr);
+            let mut flash_result = Clone::clone(&state.flash_result);
+            let mut flash_memory = Clone::clone(&state.flash_memory);
             // all C extension instructions in this quadrant (2) implemented
 
             bitmask_switch!(opcode_instr {
@@ -1336,8 +1366,11 @@ pub mod machine_module {
                     qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                     qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                     qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
-                    flash = Clone::clone(&store_result.flash);
-
+                    flash_mode = Clone::clone(&store_result.flash_mode);
+                    flash_count = Clone::clone(&store_result.flash_count);
+                    flash_addr = Clone::clone(&store_result.flash_addr);
+                    flash_result = Clone::clone(&store_result.flash_result);
+                    flash_memory = Clone::clone(&store_result.flash_memory);
                 }
                 "111_u_uuuuu_sssss" => {
                     // C.SDSP
@@ -1364,7 +1397,7 @@ pub mod machine_module {
                     qmi_direct_csr = Clone::clone(&store_result.qmi_direct_csr);
                     qmi_direct_tx = Clone::clone(&store_result.qmi_direct_tx);
                     qmi_direct_rx = Clone::clone(&store_result.qmi_direct_rx);
-                    flash = Clone::clone(&store_result.flash);
+                    // no flash 64 bit word
                 }
                 _ => unimplemented!("Given instruction in compressed quadrant 2")
             });
@@ -1376,7 +1409,11 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
-                flash,
+                flash_mode,
+                flash_count,
+                flash_addr,
+                flash_result,
+                flash_memory,
             }
         }
 
@@ -1565,97 +1602,103 @@ pub mod machine_module {
             reg
         }
 
-        fn flash_compute(flash: &Flash, data: Bitvector<8>) -> Flash {
-            let mut count = Clone::clone(&flash.count);
-            let mut mode = Clone::clone(&flash.mode);
-            let mut addr = Clone::clone(&flash.addr);
-            let mut flash_memory = Clone::clone(&flash.flash_memory);
-            let mut result: Bitvector<8> = Clone::clone(&flash.result);
+        fn flash_compute(state: &State, data: Bitvector<8>) -> State {
+            let mut flash_count = Clone::clone(&state.flash_count);
+            let mut flash_mode = Clone::clone(&state.flash_mode);
+            let mut flash_addr = Clone::clone(&state.flash_addr);
+            let mut flash_memory = Clone::clone(&state.flash_memory);
+            let mut flash_result = Clone::clone(&state.flash_result);
 
             // opcode
-            if count == Bitvector::<16>::new(0) {
+            if flash_count == Bitvector::<16>::new(0) {
                 bitmask_switch!(data {
                     // Read JEDEC_ID 0x9F
                     "10011111" => {
-                        mode = Bitvector::<2>::new(1);
+                        flash_mode = Bitvector::<2>::new(1);
                     }
                     // Read SPI Single
                     "00000011" =>{
-                        mode = Bitvector::<2>::new(3);
+                        flash_mode = Bitvector::<2>::new(3);
                     }
                     // Page prgram 0x02
                     "00000010" =>{
-                        mode = Bitvector::<2>::new(2);
+                        flash_mode = Bitvector::<2>::new(2);
                     }
                     _ => {
-                        unimplemented!("Flash-mode not supported!");
+                        unimplemented!("Flash-flash_mode not supported!");
                     }
                 });
-                result = Bitvector::<8>::new(0);
-                count = count + Bitvector::<16>::new(1);
+                flash_result = Bitvector::<8>::new(0);
+                flash_count = flash_count + Bitvector::<16>::new(1);
             } else {
-                result = Bitvector::<8>::new(0);
-                // distingish between modes and then do mode specific byte handling
-                bitmask_switch!(mode {
+                flash_result = Bitvector::<8>::new(0);
+                // distingish between flash_modes and then do flash_mode specific byte handling
+                bitmask_switch!(flash_mode {
                     // JEDEC_ID
                     "01" => {
-                        if count == Bitvector::<16>::new(1) {
-                            result = Bitvector::<8>::new(0xEF);
-                        } else if count == Bitvector::<16>::new(2) {
-                            result = Bitvector::<8>::new(0x40);
-                        } else if count == Bitvector::<16>::new(3) {
-                            result = Bitvector::<8>::new(0x16);
+                        if flash_count == Bitvector::<16>::new(1) {
+                            flash_result = Bitvector::<8>::new(0xEF);
+                        } else if flash_count == Bitvector::<16>::new(2) {
+                            flash_result = Bitvector::<8>::new(0x40);
+                        } else if flash_count == Bitvector::<16>::new(3) {
+                            flash_result = Bitvector::<8>::new(0x16);
                         } else {
                             unimplemented!("wrong byte cunt on JEDEC_ID");
                         }
                     }
-                    //read 0x03 3x Addr byte then data byte is shifted out MSB fitst and addr is incremented
+                    //read 0x03 3x flash_addr byte then data byte is shifted out MSB fitst and flash_addr is incremented
                     "11" => {
-                        if count == Bitvector::<16>::new(1) {
-                            addr = Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(16);
-                        } else if count == Bitvector::<16>::new(2) {
-                            addr = addr  | (Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(8));
-                        } else if count == Bitvector::<16>::new(3) {
-                           addr = addr  | Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data)));
-                        } else if Into::<Unsigned<16>>::into(count) > Unsigned::<16>::new(3){
-                            // cast addr into 2bit vecotr
-                            let small_addr: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<24>>::into(addr)),);
-                            let offset: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<16>>::into(count - Bitvector::<16>::new(4)),));
-                            result = flash_memory[small_addr + offset];
+                        if flash_count == Bitvector::<16>::new(1) {
+                            flash_addr = Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(16);
+                        } else if flash_count == Bitvector::<16>::new(2) {
+                            flash_addr = flash_addr  | (Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(8));
+                        } else if flash_count == Bitvector::<16>::new(3) {
+                           flash_addr = flash_addr  | Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data)));
+                        } else if Into::<Unsigned<16>>::into(flash_count) > Unsigned::<16>::new(3){
+                            // cast flash_addr into 2bit vecotr
+                            let small_flash_addr: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<24>>::into(flash_addr)),);
+                            let offset: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<16>>::into(flash_count - Bitvector::<16>::new(4)),));
+                            flash_result = flash_memory[small_flash_addr + offset];
                         }else {
                             unimplemented!("wrong byte cunt on READ");
                         }
                     }
-                    //write 0x02 
+                    //write 0x02
                     "10" => {
-                        if count == Bitvector::<16>::new(1) {
-                            addr = Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(16);
-                        } else if count == Bitvector::<16>::new(2) {
-                            addr = addr  | (Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(8));
-                        } else if count == Bitvector::<16>::new(3) {
-                           addr = addr  | Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data)));
-                        } else if Into::<Unsigned<16>>::into(count) > Unsigned::<16>::new(3){
-                            // cast addr into 2bit vecotr
-                            let small_addr: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<24>>::into(addr)),);
-                            let offset: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<16>>::into(count - Bitvector::<16>::new(4)),));
-                            flash_memory[small_addr + offset] = data;
+                        if flash_count == Bitvector::<16>::new(1) {
+                            flash_addr = Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(16);
+                        } else if flash_count == Bitvector::<16>::new(2) {
+                            flash_addr = flash_addr  | (Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data))) << Bitvector::<24>::new(8));
+                        } else if flash_count == Bitvector::<16>::new(3) {
+                           flash_addr = flash_addr  | Into::<Bitvector<24>>::into(Ext::<24>::ext(Into::<Unsigned<8>>::into(data)));
+                        } else if Into::<Unsigned<16>>::into(flash_count) > Unsigned::<16>::new(3){
+                            // cast flash_addr into 2bit vecotr
+                            let small_flash_addr: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<24>>::into(flash_addr)),);
+                            let offset: Bitvector<3> = Into::<Bitvector<3>>::into(Ext::<3>::ext(Into::<Unsigned<16>>::into(flash_count - Bitvector::<16>::new(4)),));
+                            flash_memory[small_flash_addr + offset] = data;
                         }else {
                             unimplemented!("wrong byte cunt on WRITE");
                         }
                     }
-                    _ => unimplemented!("unknown mode"),
+                    _ => unimplemented!("unknown flash_mode"),
                 });
-                count = count + Bitvector::<16>::new(1);
-                if count == Bitvector::<16>::new(7){
-                    count = Bitvector::<16>::new(0);
+                flash_count = flash_count + Bitvector::<16>::new(1);
+                if flash_count == Bitvector::<16>::new(7) {
+                    flash_count = Bitvector::<16>::new(0);
                 }
             }
 
-            Flash {
-                mode,
-                count,
-                addr,
-                result,
+            State {
+                PC: Clone::clone(&state.PC),
+                reg: Clone::clone(&state.reg),
+                sram_dynamic: Clone::clone(&state.sram_dynamic),
+                qmi_direct_csr: Clone::clone(&state.qmi_direct_csr),
+                qmi_direct_tx: Clone::clone(&state.qmi_direct_tx),
+                qmi_direct_rx: Clone::clone(&state.qmi_direct_rx),
+                flash_mode,
+                flash_count,
+                flash_addr,
+                flash_result,
                 flash_memory,
             }
         }
@@ -1688,7 +1731,11 @@ pub mod machine_module {
             let mut qmi_direct_tx = Clone::clone(&state.qmi_direct_tx);
             let mut qmi_direct_rx = Clone::clone(&state.qmi_direct_rx);
 
-            let mut flash = Clone::clone(&state.flash);
+            let mut flash_mode = Clone::clone(&state.flash_mode);
+            let mut flash_count = Clone::clone(&state.flash_count);
+            let mut flash_addr = Clone::clone(&state.flash_addr);
+            let mut flash_result = Clone::clone(&state.flash_result);
+            let mut flash_memory = Clone::clone(&state.flash_memory);
 
             if address >= Unsigned::<64>::new(0x2000_4000)
                 && last_address < Unsigned::<64>::new(0x2000_8000)
@@ -1767,10 +1814,14 @@ pub mod machine_module {
 
                         // every tx is handled by flash_compute. flash_computes always retunrs something must be handle by qmi depending on NOPUSH
                         let data: Bitvector<8> = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
-                        flash = Self::flash_compute(&flash, data);
-
+                        let flash_state: State = Self::flash_compute(&state, data);
+                        flash_mode = flash_state.flash_mode;
+                        flash_count = flash_state.flash_count;
+                        flash_addr = flash_state.flash_addr;
+                        flash_result = flash_state.flash_result;
+                        flash_memory = flash_state.flash_memory;
                         // nopush later
-                        qmi_direct_rx = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Unsigned<8>>::into(flash.result),));
+                        qmi_direct_rx = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Unsigned<8>>::into(flash_state.flash_result),));
                     }
                     // probably no store here only read
                     // RX 0x8
@@ -1792,7 +1843,11 @@ pub mod machine_module {
                 qmi_direct_csr,
                 qmi_direct_tx,
                 qmi_direct_rx,
-                flash,
+                flash_mode,
+                flash_count,
+                flash_addr,
+                flash_result,
+                flash_memory,
             }
         }
 
