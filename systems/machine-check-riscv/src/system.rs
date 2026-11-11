@@ -1683,9 +1683,6 @@ pub mod machine_module {
                     _ => unimplemented!("unknown flash_mode"),
                 });
                 flash_count = flash_count + Bitvector::<16>::new(1);
-                if flash_count == Bitvector::<16>::new(7) {
-                    flash_count = Bitvector::<16>::new(0);
-                }
             }
 
             State {
@@ -1807,21 +1804,33 @@ pub mod machine_module {
                     "00000000" => {
                         qmi_direct_csr = Into::<Bitvector<32>>::into(Ext::<32>::ext(store_unsigned));
                         // here is CS change can happen, so later can reset the Flash state.
+                        // CS low
+                        if(qmi_direct_csr & Bitvector::<32>::new(4)) == Bitvector::<32>::new(0){
+                            // has to be reset
+                            flash_count = Bitvector::<16>::new(0);
+                            // here not necesariy but is cleaner
+                            flash_result = Bitvector::<8>::new(0);
+                            flash_addr = Bitvector::<24>::new(0);
+                            flash_mode = Bitvector::<2>::new(0);
+                        }   
                     }
                     // TX 0x4
                     "00000100" => {
                         qmi_direct_tx = Into::<Bitvector<32>>::into(Ext::<32>::ext(store_unsigned));
-
-                        // every tx is handled by flash_compute. flash_computes always retunrs something must be handle by qmi depending on NOPUSH
-                        let data: Bitvector<8> = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
-                        let flash_state: State = Self::flash_compute(&state, data);
-                        flash_mode = flash_state.flash_mode;
-                        flash_count = flash_state.flash_count;
-                        flash_addr = flash_state.flash_addr;
-                        flash_result = flash_state.flash_result;
-                        flash_memory = flash_state.flash_memory;
-                        // nopush later
-                        qmi_direct_rx = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Unsigned<8>>::into(flash_state.flash_result),));
+                        // CS high
+                        if(qmi_direct_csr & Bitvector::<32>::new(4)) == Bitvector::<32>::new(4){
+                            // every tx is handled by flash_compute. flash_computes always retunrs something must be handle by qmi depending on NOPUSH
+                            let data: Bitvector<8> = Into::<Bitvector<8>>::into(Ext::<8>::ext(store_unsigned));
+                            let flash_state: State = Self::flash_compute(&state, data);
+                            flash_mode = flash_state.flash_mode;
+                            flash_count = flash_state.flash_count;
+                            flash_addr = flash_state.flash_addr;
+                            flash_result = flash_state.flash_result;
+                            flash_memory = flash_state.flash_memory;
+                            // nopush later
+                            qmi_direct_rx = Into::<Bitvector<32>>::into(Ext::<32>::ext(Into::<Unsigned<8>>::into(flash_state.flash_result),)); 
+                        }
+                        
                     }
                     // probably no store here only read
                     // RX 0x8
