@@ -91,7 +91,8 @@ pub mod machine_module {
             // SRAM data is undefined after power-on
             let sram_dynamic = Clone::clone(&self.sram_dynamic);
             let PC = Clone::clone(&self.pc_entry);
-            let qmi_direct_csr = Clone::clone(&self.qmi_direct_csr);
+            // 0x06 at 29:22
+            let qmi_direct_csr = Bitvector::<32>::new(0x06) << Bitvector::<32>::new(22);
             let qmi_direct_tx = Clone::clone(&self.qmi_direct_tx);
             let qmi_direct_rx = Clone::clone(&self.qmi_direct_rx);
             let flash = Flash {
@@ -1748,6 +1749,9 @@ pub mod machine_module {
             } else if address >= Unsigned::<64>::new(0x400d_0000)
                 && last_address < Unsigned::<64>::new(0x400d_000c)
             {
+                if funct3 != Unsigned::<3>::new(0b010) {
+                    unimplemented!("QMI stores must be 32-bit");
+                }
                 let relative_address = Into::<Bitvector<8>>::into(Ext::<8>::ext(
                     address - Unsigned::<64>::new(0x400d_0000),
                 ));
